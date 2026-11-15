@@ -1,15 +1,10 @@
-#nullable disable
-using System;
+#nullable enable
 using System.Collections.Concurrent;
-using System.Collections.Generic;
-using System.Linq;
 using System.Net;
-using System.Threading;
-using System.Threading.Tasks;
+using CosmosResponseFactory = CosmosDB.InMemoryEmulator.Infrastructure.SdkInterop.CosmosResponseFactory;
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
-using NSubstitute;
 
 namespace CosmosDB.InMemoryEmulator;
 
@@ -32,19 +27,19 @@ public sealed class InMemoryPermission : Permission
 
     public override Task<PermissionResponse> ReadAsync(
         int? tokenExpiryInSeconds = null,
-        RequestOptions requestOptions = null,
+        RequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
     {
         if (!_parentPermissions.TryGetValue(Id, out var props))
             throw InMemoryCosmosException.Create($"Permission '{Id}' not found.", HttpStatusCode.NotFound, 0, string.Empty, 0);
 
-        return Task.FromResult(BuildPermissionResponse(props, HttpStatusCode.OK));
+        return Task.FromResult(CosmosResponseFactory.CreatePermissionResponse(this, props, HttpStatusCode.OK));
     }
 
     public override Task<PermissionResponse> ReplaceAsync(
         PermissionProperties permissionProperties,
         int? tokenExpiryInSeconds = null,
-        RequestOptions requestOptions = null,
+        RequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
     {
         if (!_parentPermissions.ContainsKey(Id))
@@ -52,36 +47,25 @@ public sealed class InMemoryPermission : Permission
 
         var updated = WithSyntheticMetadata(permissionProperties);
         _parentPermissions[Id] = updated;
-        return Task.FromResult(BuildPermissionResponse(updated, HttpStatusCode.OK));
+        return Task.FromResult(CosmosResponseFactory.CreatePermissionResponse(this, updated, HttpStatusCode.OK));
     }
 
     public override Task<PermissionResponse> DeleteAsync(
-        RequestOptions requestOptions = null,
+        RequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
     {
         if (!_parentPermissions.TryRemove(Id, out _))
             throw InMemoryCosmosException.Create($"Permission '{Id}' not found.", HttpStatusCode.NotFound, 0, string.Empty, 0);
 
-        return Task.FromResult(BuildPermissionResponse(null, HttpStatusCode.NoContent));
+        return Task.FromResult(CosmosResponseFactory.CreatePermissionResponse(this, null, HttpStatusCode.NoContent));
     }
 
     internal static PermissionProperties WithSyntheticMetadata(PermissionProperties source)
     {
-        // PermissionProperties has private setters for ETag, Token, LastModified.
-        // Roundtrip through JSON to set them.
         var json = JObject.FromObject(source);
         json["_etag"] = $"\"{Guid.NewGuid()}\"";
         json["_ts"] = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
         json["_token"] = $"type=resource&ver=1&sig=stub_{source.Id}";
-        return JsonConvert.DeserializeObject<PermissionProperties>(json.ToString());
-    }
-
-    private PermissionResponse BuildPermissionResponse(PermissionProperties props, HttpStatusCode statusCode)
-    {
-        var response = Substitute.For<PermissionResponse>();
-        response.StatusCode.Returns(statusCode);
-        response.Resource.Returns(props);
-        response.Permission.Returns(this);
-        return response;
+        return JsonConvert.DeserializeObject<PermissionProperties>(json.ToString())!;
     }
 }
