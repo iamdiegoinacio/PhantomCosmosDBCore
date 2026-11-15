@@ -1,3 +1,4 @@
+#nullable enable
 namespace CosmosDB.InMemoryEmulator;
 
 /// <summary>
