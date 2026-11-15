@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+#nullable enable
 using Microsoft.Azure.Cosmos;
 
 namespace CosmosDB.InMemoryEmulator;
@@ -33,17 +33,14 @@ public static class SdkVersionDriftDetector
             report.CompatibilityError = ex.Message;
         }
 
-        // Run a handler to collect unrecognised headers across multiple code paths
         var container = new InMemoryContainer("drift-check", "/pk");
         await container.CreateItemAsync(new { id = "1", pk = "a" }, new PartitionKey("a"));
         using var handler = new FakeCosmosHandler(container);
         using var client = handler.CreateClient();
         var cosmosContainer = client.GetContainer("db", "drift-check");
 
-        // Exercise read path
         await cosmosContainer.ReadItemAsync<dynamic>("1", new PartitionKey("a"));
 
-        // Exercise query path
         var iterator = cosmosContainer.GetItemQueryIterator<dynamic>("SELECT * FROM c");
         while (iterator.HasMoreResults) await iterator.ReadNextAsync();
 
@@ -59,35 +56,4 @@ public static class SdkVersionDriftDetector
         return sdkVersion >= FakeCosmosHandler.MinTestedSdkVersion
             && sdkVersion <= FakeCosmosHandler.MaxTestedSdkVersion;
     }
-}
-
-/// <summary>
-/// Structured report produced by <see cref="SdkVersionDriftDetector.RunAsync"/>.
-/// Serialisable to JSON for CI artifact consumption.
-/// </summary>
-public sealed class DriftReport
-{
-    [JsonPropertyName("sdkVersion")]
-    public string SdkVersion { get; set; } = "";
-
-    [JsonPropertyName("testSuiteVersion")]
-    public string TestSuiteVersion { get; set; } = "";
-
-    [JsonPropertyName("minTestedVersion")]
-    public string MinTestedVersion { get; set; } = "";
-
-    [JsonPropertyName("maxTestedVersion")]
-    public string MaxTestedVersion { get; set; } = "";
-
-    [JsonPropertyName("isWithinTestedRange")]
-    public bool IsWithinTestedRange { get; set; }
-
-    [JsonPropertyName("compatibilityPassed")]
-    public bool CompatibilityPassed { get; set; }
-
-    [JsonPropertyName("compatibilityError")]
-    public string? CompatibilityError { get; set; }
-
-    [JsonPropertyName("unrecognisedHeaders")]
-    public List<string> UnrecognisedHeaders { get; set; } = [];
 }

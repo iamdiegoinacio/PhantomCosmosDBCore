@@ -1,4 +1,6 @@
+#nullable enable
 using System.Text.RegularExpressions;
+using CosmosDB.InMemoryEmulator.Infrastructure.HttpGateway;
 using Newtonsoft.Json.Linq;
 
 namespace CosmosDB.InMemoryEmulator;
@@ -38,7 +40,6 @@ public sealed class DefaultQueryPlanStrategy : IQueryPlanStrategy
             queryInfo["rewrittenQuery"] = sqlQuery;
         }
 
-        // COUNT(DISTINCT ...) — dCountInfo
         AddCountDistinctInfo(queryInfo, sqlQuery);
 
         return new JObject
@@ -57,7 +58,6 @@ public sealed class DefaultQueryPlanStrategy : IQueryPlanStrategy
 
     private static void BuildFromParsedQuery(JObject queryInfo, CosmosSqlQuery parsed, string sqlQuery)
     {
-        // ORDER BY
         if (parsed.OrderByFields is { Length: > 0 })
         {
             var orderByArr = new JArray();
@@ -73,13 +73,11 @@ public sealed class DefaultQueryPlanStrategy : IQueryPlanStrategy
             queryInfo["hasNonStreamingOrderBy"] = true;
         }
 
-        // TOP
         if (parsed.TopCount.HasValue)
         {
             queryInfo["top"] = parsed.TopCount.Value;
         }
 
-        // OFFSET / LIMIT
         if (parsed.Offset.HasValue)
         {
             queryInfo["offset"] = parsed.Offset.Value;
@@ -90,7 +88,6 @@ public sealed class DefaultQueryPlanStrategy : IQueryPlanStrategy
             queryInfo["limit"] = parsed.Limit.Value;
         }
 
-        // DISTINCT
         if (parsed.IsDistinct)
         {
             var isOrdered = false;
@@ -103,7 +100,6 @@ public sealed class DefaultQueryPlanStrategy : IQueryPlanStrategy
             queryInfo["distinctType"] = isOrdered ? "Ordered" : "Unordered";
         }
 
-        // GROUP BY
         if (parsed.GroupByFields is { Length: > 0 })
         {
             queryInfo["groupByExpressions"] = new JArray(parsed.GroupByFields);
@@ -118,7 +114,6 @@ public sealed class DefaultQueryPlanStrategy : IQueryPlanStrategy
             queryInfo["groupByAliases"] = aliases;
         }
 
-        // Aggregates
         var aggregates = new JArray();
         var groupByAliasToAgg = new JObject();
         foreach (var field in parsed.SelectFields)
@@ -136,28 +131,16 @@ public sealed class DefaultQueryPlanStrategy : IQueryPlanStrategy
             queryInfo["groupByAliasToAggregateType"] = groupByAliasToAgg;
         }
 
-        // SELECT VALUE
         if (parsed.IsValueSelect)
         {
             queryInfo["hasSelectValue"] = true;
         }
 
-        // Suppress SDK pipeline for GROUP BY and any aggregate queries. The SDK's
-        // AggregateQueryPipelineStage expects a {payload: {alias: {item: value}}} envelope
-        // the handler only produces for GROUP BY responses. On non-Windows platforms
-        // (where ServiceInterop is unavailable), this plan drives the SDK pipeline —
-        // if we report aggregates, the SDK enters its aggregate accumulator which
-        // fails because our handler returns pre-computed results directly.
-        // Also bypass COUNTIF (not recognized by SDK pipeline) and literal+aggregate
-        // combinations (e.g. SELECT 42 AS X, COUNT(1) AS N) which crash with
-        // "Underlying object does not have an 'payload' field".
         var isGroupByBypass = parsed.GroupByFields is { Length: > 0 };
         var aggregateFieldCount = parsed.SelectFields.Count(f => ContainsAggregate(f.SqlExpr));
         var isAggregateBypass = !isGroupByBypass && aggregateFieldCount > 0;
         var isCountIfBypass = !isGroupByBypass
             && parsed.SelectFields.Any(f => ContainsCountIf(f.SqlExpr));
-        // Bypass when there are non-aggregate expression fields (literals, function calls)
-        // alongside at least one aggregate — the SDK pipeline can't project these.
         var isLiteralWithAggregateBypass = !isGroupByBypass && !parsed.IsValueSelect
             && aggregateFieldCount > 0
             && parsed.SelectFields.Any(f => !ContainsAggregate(f.SqlExpr)
@@ -177,14 +160,13 @@ public sealed class DefaultQueryPlanStrategy : IQueryPlanStrategy
             }
         }
 
-        // Rewritten query
         if (parsed.OrderByFields is { Length: > 0 })
         {
-            queryInfo["rewrittenQuery"] = FakeCosmosHandler.BuildOrderByRewrittenQueryStatic(parsed);
+            queryInfo["rewrittenQuery"] = GatewayOrderByQueryRewriter.BuildOrderByRewrittenQuery(parsed);
         }
         else if (parsed.Offset.HasValue || parsed.Limit.HasValue)
         {
-            queryInfo["rewrittenQuery"] = FakeCosmosHandler.StripOffsetLimitStatic(sqlQuery);
+            queryInfo["rewrittenQuery"] = GatewayOrderByQueryRewriter.StripOffsetLimit(sqlQuery);
         }
         else
         {
