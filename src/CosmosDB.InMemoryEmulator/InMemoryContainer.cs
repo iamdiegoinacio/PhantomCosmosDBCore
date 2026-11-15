@@ -478,29 +478,24 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         PartitionKey? partitionKey = null,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.CreateItemAsync(
-            item, partitionKey, requestOptions, _store, _changeFeedLog, Id,
-            PartitionKeyPaths, _containerProperties, DefaultTimeToLive, JsonSettings,
-            ExecutePreTriggers, ExecutePostTriggers, cancellationToken);
+        => TypedDocumentCrudService.CreateItemAsync(
+            CreateOperationContext(), item, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ItemResponse<T>> ReadItemAsync<T>(
         string id,
         PartitionKey partitionKey,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.ReadItemAsync<T>(
-            id, partitionKey, requestOptions, _store, _changeFeedLog,
-            PartitionKeyPaths, DefaultTimeToLive, JsonSettings, cancellationToken);
+        => TypedDocumentCrudService.ReadItemAsync<T>(
+            CreateOperationContext(), id, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ItemResponse<T>> UpsertItemAsync<T>(
         T item,
         PartitionKey? partitionKey = null,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.UpsertItemAsync(
-            item, partitionKey, requestOptions, _store, _changeFeedLog, Id,
-            PartitionKeyPaths, _containerProperties, DefaultTimeToLive, JsonSettings,
-            ExecutePreTriggers, ExecutePostTriggers, cancellationToken);
+        => TypedDocumentCrudService.UpsertItemAsync(
+            CreateOperationContext(), item, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ItemResponse<T>> ReplaceItemAsync<T>(
         T item,
@@ -508,19 +503,16 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         PartitionKey? partitionKey = null,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.ReplaceItemAsync(
-            item, id, partitionKey, requestOptions, _store, _changeFeedLog, Id,
-            PartitionKeyPaths, _containerProperties, DefaultTimeToLive, JsonSettings,
-            ExecutePreTriggers, ExecutePostTriggers, cancellationToken);
+        => TypedDocumentCrudService.ReplaceItemAsync(
+            CreateOperationContext(), item, id, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ItemResponse<T>> DeleteItemAsync<T>(
         string id,
         PartitionKey partitionKey,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.DeleteItemAsync<T>(
-            id, partitionKey, requestOptions, _store, _changeFeedLog,
-            PartitionKeyPaths, DefaultTimeToLive, ExecutePreTriggers, ExecutePostTriggers, cancellationToken);
+        => TypedDocumentCrudService.DeleteItemAsync<T>(
+            CreateOperationContext(), id, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ItemResponse<T>> PatchItemAsync<T>(
         string id,
@@ -538,29 +530,24 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         PartitionKey partitionKey,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.CreateItemStreamAsync(
-            streamPayload, partitionKey, requestOptions, _store, _changeFeedLog, Id,
-            PartitionKeyPaths, _containerProperties, DefaultTimeToLive,
-            ExecutePreTriggers, ExecutePostTriggers, cancellationToken);
+        => StreamDocumentCrudService.CreateItemStreamAsync(
+            CreateOperationContext(), streamPayload, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ResponseMessage> ReadItemStreamAsync(
         string id,
         PartitionKey partitionKey,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.ReadItemStreamAsync(
-            id, partitionKey, requestOptions, _store, _changeFeedLog,
-            PartitionKeyPaths, DefaultTimeToLive, cancellationToken);
+        => StreamDocumentCrudService.ReadItemStreamAsync(
+            CreateOperationContext(), id, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ResponseMessage> UpsertItemStreamAsync(
         Stream streamPayload,
         PartitionKey partitionKey,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.UpsertItemStreamAsync(
-            streamPayload, partitionKey, requestOptions, _store, _changeFeedLog, Id,
-            PartitionKeyPaths, _containerProperties, DefaultTimeToLive,
-            ExecutePreTriggers, ExecutePostTriggers, cancellationToken);
+        => StreamDocumentCrudService.UpsertItemStreamAsync(
+            CreateOperationContext(), streamPayload, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ResponseMessage> ReplaceItemStreamAsync(
         Stream streamPayload,
@@ -568,19 +555,16 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         PartitionKey partitionKey,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.ReplaceItemStreamAsync(
-            streamPayload, id, partitionKey, requestOptions, _store, _changeFeedLog, Id,
-            PartitionKeyPaths, _containerProperties, DefaultTimeToLive,
-            ExecutePreTriggers, ExecutePostTriggers, cancellationToken);
+        => StreamDocumentCrudService.ReplaceItemStreamAsync(
+            CreateOperationContext(), streamPayload, id, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ResponseMessage> DeleteItemStreamAsync(
         string id,
         PartitionKey partitionKey,
         ItemRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.DeleteItemStreamAsync(
-            id, partitionKey, requestOptions, _store, _changeFeedLog,
-            PartitionKeyPaths, DefaultTimeToLive, ExecutePreTriggers, ExecutePostTriggers, cancellationToken);
+        => StreamDocumentCrudService.DeleteItemStreamAsync(
+            CreateOperationContext(), id, partitionKey, requestOptions, cancellationToken);
 
     public override Task<ResponseMessage> PatchItemStreamAsync(
         string id,
@@ -597,22 +581,22 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         IReadOnlyList<(string id, PartitionKey partitionKey)> items,
         ReadManyRequestOptions? readManyRequestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.ReadManyItemsAsync<T>(
-            items, readManyRequestOptions, _store, DefaultTimeToLive, JsonSettings, cancellationToken);
+        => BulkDocumentReadDeleteService.ReadManyItemsAsync<T>(
+            CreateOperationContext(), items, readManyRequestOptions, cancellationToken);
 
     public override Task<ResponseMessage> ReadManyItemsStreamAsync(
         IReadOnlyList<(string id, PartitionKey partitionKey)> items,
         ReadManyRequestOptions? readManyRequestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.ReadManyItemsStreamAsync(
-            items, readManyRequestOptions, _store, _changeFeedLog, DefaultTimeToLive, cancellationToken);
+        => BulkDocumentReadDeleteService.ReadManyItemsStreamAsync(
+            CreateOperationContext(), items, readManyRequestOptions, cancellationToken);
 
     public override Task<ResponseMessage> DeleteAllItemsByPartitionKeyStreamAsync(
         PartitionKey partitionKey,
         RequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-        => DocumentCrudService.DeleteAllItemsByPartitionKeyStreamAsync(
-            partitionKey, _store, _changeFeedLog, PartitionKeyPaths, cancellationToken);
+        => BulkDocumentReadDeleteService.DeleteAllItemsByPartitionKeyStreamAsync(
+            CreateOperationContext(), partitionKey, cancellationToken);
 
     // ═══════════════════════════════════════════════════════════════════════════
     //  Query — Typed & Stream FeedIterators
@@ -1091,6 +1075,18 @@ internal class InMemoryContainer : Container, IContainerTestSetup
 
     private IEnumerable<string> GetAllItemsForPartition(QueryRequestOptions? requestOptions)
         => _store.GetAllItemsForPartition(requestOptions, PartitionKeyPaths, DefaultTimeToLive);
+
+    private DocumentOperationContext CreateOperationContext()
+        => new(
+            _store,
+            _changeFeedLog,
+            Id,
+            PartitionKeyPaths,
+            _containerProperties,
+            DefaultTimeToLive,
+            JsonSettings,
+            ExecutePreTriggers,
+            ExecutePostTriggers);
 
     private QueryExecutionContext CreateQueryContext(IDictionary<string, object?> parameters)
         => new(
