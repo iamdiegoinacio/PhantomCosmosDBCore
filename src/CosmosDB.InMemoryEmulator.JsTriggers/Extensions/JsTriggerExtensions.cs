@@ -1,3 +1,4 @@
+#nullable enable
 namespace CosmosDB.InMemoryEmulator.JsTriggers;
 
 /// <summary>
@@ -8,10 +9,13 @@ public static class JsTriggerExtensions
     /// <summary>
     /// Enables JavaScript trigger body interpretation using the Jint engine.
     /// Call this on an <see cref="IContainerTestSetup"/> to allow triggers registered
-    /// via <c>CreateTriggerAsync</c> (with a JS body) to execute.
+    /// via <c>CreateTriggerAsync</c> (with a JS body) to execute. This also enables
+    /// JavaScript UDFs, since the trigger engine implements <see cref="IJsUdfEngine"/>.
     /// </summary>
     public static IContainerTestSetup UseJsTriggers(this IContainerTestSetup container)
     {
+        ArgumentNullException.ThrowIfNull(container);
+
         container.JsTriggerEngine = new JintTriggerEngine();
         return container;
     }
@@ -23,6 +27,8 @@ public static class JsTriggerExtensions
     /// </summary>
     public static IContainerTestSetup UseJsStoredProcedures(this IContainerTestSetup container)
     {
+        ArgumentNullException.ThrowIfNull(container);
+
         container.SprocEngine = new JintSprocEngine();
         return container;
     }
