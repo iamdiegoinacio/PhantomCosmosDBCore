@@ -1,3 +1,4 @@
+#nullable enable
 using Microsoft.Azure.Cosmos;
 
 namespace CosmosDB.InMemoryEmulator;
@@ -5,8 +6,7 @@ namespace CosmosDB.InMemoryEmulator;
 /// <summary>
 /// Options for <see cref="ServiceCollectionExtensions.UseInMemoryCosmosContainers"/>.
 /// Configures how Container registrations are replaced with in-memory equivalents
-/// backed by <see cref="FakeCosmosHandler"/>. The production <see cref="CosmosClient"/>
-/// registration is NOT replaced.
+/// backed by <see cref="FakeCosmosHandler"/>.
 /// </summary>
 public class InMemoryContainerOptions
 {
@@ -30,38 +30,23 @@ public class InMemoryContainerOptions
 
     /// <summary>
     /// Callback invoked with each container's <see cref="IContainerTestSetup"/> after it is created.
-    /// Use this to configure container properties (TTL, feed ranges), seed data, or capture references.
     /// </summary>
     public Action<IContainerTestSetup>? OnContainerCreated { get; set; }
 
     /// <summary>
     /// Callback invoked with each <see cref="FakeCosmosHandler"/> after it is created.
-    /// Use this to capture handler references for fault injection, request logging,
-    /// or to access the backing <see cref="InMemoryContainer"/> via
-    /// <see cref="FakeCosmosHandler.BackingContainer"/>.
     /// </summary>
     public Action<string, FakeCosmosHandler>? OnHandlerCreated { get; set; }
 
     /// <summary>
     /// Optional function that wraps the final <see cref="HttpMessageHandler"/>
-    /// (the <see cref="FakeCosmosHandler"/> or multi-container router) before it is
-    /// passed to the internal <see cref="CosmosClient"/>.
-    /// <para>
-    /// Use this to insert a <see cref="DelegatingHandler"/> into the pipeline.
-    /// The input is the handler that serves in-memory responses; the return value
-    /// replaces it as the outermost handler in the <see cref="HttpClient"/>.
-    /// </para>
+    /// before it is passed to the internal <see cref="CosmosClient"/>.
     /// </summary>
     public Func<HttpMessageHandler, HttpMessageHandler>? HttpMessageHandlerWrapper { get; private set; }
 
     /// <summary>
     /// When set, each container automatically loads its state from this directory on creation
-    /// and saves its state back on disposal. Files are named <c>{ContainerName}.json</c>.
-    /// If the directory or file does not exist, the container starts empty—state is saved on first disposal.
-    /// <para>
-    /// This enables persisting container data between test runs without any manual
-    /// <see cref="InMemoryContainer.ExportState"/>/<see cref="InMemoryContainer.ImportState"/> calls.
-    /// </para>
+    /// and saves its state back on disposal.
     /// </summary>
     public string? StatePersistenceDirectory { get; set; }
 
@@ -88,19 +73,11 @@ public class InMemoryContainerOptions
     }
 
     /// <summary>
-    /// Adds a container configuration using full <see cref="ContainerProperties"/>,
-    /// which supports UniqueKeyPolicy, DefaultTimeToLive, hierarchical partition keys, etc.
+    /// Adds a container configuration using full <see cref="ContainerProperties"/>.
     /// </summary>
     public InMemoryContainerOptions AddContainer(ContainerProperties containerProperties)
     {
-        string pkPath;
-        try { pkPath = containerProperties.PartitionKeyPath; }
-        catch (NotImplementedException) { pkPath = containerProperties.PartitionKeyPaths[0]; }
-
-        Containers.Add(new ContainerConfig(
-            containerProperties.Id,
-            pkPath,
-            ContainerProperties: containerProperties));
+        Containers.Add(ContainerConfig.FromContainerProperties(containerProperties));
         return this;
     }
 }
