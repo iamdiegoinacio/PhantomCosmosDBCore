@@ -1,3 +1,5 @@
+#nullable enable
+using CosmosDB.InMemoryEmulator.Infrastructure.HttpGateway;
 using Microsoft.Azure.Cosmos;
 
 namespace CosmosDB.InMemoryEmulator;
@@ -5,8 +7,7 @@ namespace CosmosDB.InMemoryEmulator;
 /// <summary>
 /// Default implementation of <see cref="IBatchSchemaStrategy"/> that resolves HybridRow
 /// schemas using the self-built approach first, then falls back to reflection into the
-/// SDK's internal BatchSchemaProvider. If both approaches fail, <see cref="IsAvailable"/>
-/// returns false and batch requests return 501 Not Implemented instead of throwing.
+/// SDK's internal BatchSchemaProvider.
 /// </summary>
 public sealed class DefaultBatchSchemaStrategy : IBatchSchemaStrategy
 {
@@ -22,8 +23,7 @@ public sealed class DefaultBatchSchemaStrategy : IBatchSchemaStrategy
     {
         try
         {
-            // Force the BatchSchemas lazy to evaluate — if it throws, schemas are unavailable.
-            _ = FakeCosmosHandler.BatchSchemasAvailable;
+            _ = HybridRowBatchCodec.BatchSchemasAvailable;
             return (true, null);
         }
         catch (Exception ex)
