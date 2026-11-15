@@ -1,10 +1,13 @@
-#nullable disable
+#nullable enable
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
 namespace CosmosDB.InMemoryEmulator;
 
+/// <summary>
+/// Partition-scoped implementation of <see cref="ICollectionContext"/> for server-side JavaScript scripts.
+/// </summary>
 internal sealed class PartitionScopedCollectionContext : ICollectionContext
 {
     private readonly InMemoryContainer _container;
