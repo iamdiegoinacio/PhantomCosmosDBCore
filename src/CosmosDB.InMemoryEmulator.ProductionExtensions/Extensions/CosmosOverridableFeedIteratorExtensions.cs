@@ -1,3 +1,5 @@
+#nullable enable
+using CosmosDB.InMemoryEmulator.ProductionExtensions.Interception;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Cosmos.Linq;
 
@@ -85,41 +87,6 @@ namespace CosmosDB.InMemoryEmulator.ProductionExtensions;
 [Obsolete("No longer needed since 4.0. All recommended approaches (InMemoryCosmos, UseInMemoryCosmosDB, UseInMemoryCosmosContainers) use FakeCosmosHandler which handles .ToFeedIterator() natively. Use .ToFeedIterator() instead of .ToFeedIteratorOverridable().")]
 public static class CosmosOverridableFeedIteratorExtensions
 {
-    // ──────────────────────────────────────────────────────────────────────
-    //  Factory 1: AsyncLocal (per-async-flow, test-isolated)
-    // ──────────────────────────────────────────────────────────────────────
-    //
-    //  AsyncLocal<T> stores a value that flows with ExecutionContext. Every
-    //  async continuation (await, Task.Run, etc.) inherits the calling flow's
-    //  value. This means parallel xUnit tests — each running in their own
-    //  async flow — see their own factory without cross-talk.
-    //
-    //  Limitation: `new Thread()` does NOT capture ExecutionContext, so the
-    //  AsyncLocal value will be null on a bare thread. That's what the static
-    //  fallback below is for.
-    // ──────────────────────────────────────────────────────────────────────
-    private static readonly AsyncLocal<Func<object, object>?> _factory = new();
-
-    // ──────────────────────────────────────────────────────────────────────
-    //  Factory 2: Static fallback (global, catches new Thread())
-    // ──────────────────────────────────────────────────────────────────────
-    //
-    //  A plain static field marked volatile for safe cross-thread reads.
-    //  Only consulted when the AsyncLocal factory is null — i.e. when we're
-    //  on a thread that didn't inherit ExecutionContext.
-    //
-    //  Why is this safe? The factory delegate is stateless: it receives an
-    //  IQueryable<T> and materialises it into an InMemoryFeedIterator<T>.
-    //  Each test's queryable points at that test's in-memory data, so even
-    //  though this field is globally shared, there's no data cross-talk.
-    //
-    //  Edge case: if test A calls Deregister() while test B's new Thread()
-    //  is mid-flight, B's thread could hit .ToFeedIterator() and throw.
-    //  This is a pre-existing test isolation issue — not caused by the
-    //  fallback mechanism.
-    // ──────────────────────────────────────────────────────────────────────
-    private static volatile Func<object, object>? _staticFallbackFactory;
-
     /// <summary>
     /// Per-async-flow factory delegate for creating feed iterators in tests.
     ///
@@ -136,8 +103,8 @@ public static class CosmosOverridableFeedIteratorExtensions
     /// </summary>
     public static Func<object, object>? FeedIteratorFactory
     {
-        get => _factory.Value;
-        set => _factory.Value = value;
+        get => FeedIteratorOverrideRegistry.PerAsyncFlowFactory;
+        set => FeedIteratorOverrideRegistry.PerAsyncFlowFactory = value;
     }
 
     /// <summary>
@@ -158,8 +125,8 @@ public static class CosmosOverridableFeedIteratorExtensions
     /// </summary>
     public static Func<object, object>? StaticFallbackFactory
     {
-        get => _staticFallbackFactory;
-        set => _staticFallbackFactory = value;
+        get => FeedIteratorOverrideRegistry.StaticFallbackFactory;
+        set => FeedIteratorOverrideRegistry.StaticFallbackFactory = value;
     }
 
     /// <summary>
@@ -195,7 +162,9 @@ public static class CosmosOverridableFeedIteratorExtensions
         // Check AsyncLocal first (test-isolated, per-async-flow), then static fallback
         // (catches new Thread() where AsyncLocal doesn't flow). If both are null, we're
         // in production — delegate to the real Cosmos SDK.
-        var factory = FeedIteratorFactory ?? StaticFallbackFactory;
+        ArgumentNullException.ThrowIfNull(queryable);
+
+        var factory = FeedIteratorOverrideRegistry.Resolve();
 
         if (factory is not null)
         {
