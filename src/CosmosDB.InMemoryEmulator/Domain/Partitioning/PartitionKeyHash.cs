@@ -1,3 +1,4 @@
+#nullable enable
 using System.Text;
 
 namespace CosmosDB.InMemoryEmulator;
@@ -56,8 +57,6 @@ internal static class PartitionKeyHash
     {
         if (rangeCount <= 1) return 0;
         var hash = MurmurHash3(partitionKeyValue);
-        // Use interval-based assignment matching FeedRange boundaries
-        // which divide the uint32 hash space [0, 0x100000000) into N equal intervals
         var step = 0x1_0000_0000L / rangeCount;
         var index = (int)(hash / step);
         return Math.Min(index, rangeCount - 1);
@@ -65,7 +64,6 @@ internal static class PartitionKeyHash
 
     /// <summary>
     /// Converts a 0-based range index to a hex boundary string for FeedRangeEpk.
-    /// Range boundaries divide the uint32 hash space evenly and are encoded as uppercase hex.
     /// </summary>
     internal static string RangeBoundaryToHex(long boundary)
     {

@@ -1,3 +1,4 @@
+#nullable enable
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Cosmos.Scripts;
 using Newtonsoft.Json.Linq;
@@ -28,7 +29,10 @@ public interface IContainerTestSetup
     /// For pre-triggers, the handler receives and returns the (possibly modified) document.
     /// For post-triggers, wrap an <see cref="Action{JObject}"/> in a lambda that returns the input.
     /// </summary>
-    void RegisterTrigger(string id, TriggerType type, TriggerOperation operation,
+    void RegisterTrigger(
+        string id,
+        TriggerType type,
+        TriggerOperation operation,
         Func<JObject, JObject> handler);
 
     // ─── JS body registrations (requires JsTriggers package) ──────────────────
@@ -37,28 +41,22 @@ public interface IContainerTestSetup
     /// Registers a stored procedure from a JavaScript function body.
     /// Requires the <c>CosmosDB.InMemoryEmulator.JsTriggers</c> package.
     /// </summary>
-    /// <exception cref="NotImplementedException">
-    /// Thrown when the JsTriggers package is not installed.
-    /// </exception>
     void RegisterStoredProcedure(string id, string jsBody);
 
     /// <summary>
     /// Registers a UDF from a JavaScript function body.
     /// Requires the <c>CosmosDB.InMemoryEmulator.JsTriggers</c> package.
     /// </summary>
-    /// <exception cref="NotImplementedException">
-    /// Thrown when the JsTriggers package is not installed.
-    /// </exception>
     void RegisterUdf(string name, string jsBody);
 
     /// <summary>
     /// Registers a trigger from a JavaScript function body.
     /// Requires the <c>CosmosDB.InMemoryEmulator.JsTriggers</c> package.
     /// </summary>
-    /// <exception cref="NotImplementedException">
-    /// Thrown when the JsTriggers package is not installed.
-    /// </exception>
-    void RegisterTrigger(string id, TriggerType type, TriggerOperation operation,
+    void RegisterTrigger(
+        string id,
+        TriggerType type,
+        TriggerOperation operation,
         string jsBody);
 
     // ─── State management ─────────────────────────────────────────────────────
