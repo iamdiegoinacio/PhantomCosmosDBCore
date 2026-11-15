@@ -107,6 +107,45 @@ internal static class CosmosResponseFactory
         return r;
     }
 
+    public static DatabaseResponse CreateDatabaseResponse(
+        Database database,
+        HttpStatusCode statusCode,
+        DatabaseProperties? properties = null)
+    {
+        var r = Substitute.For<DatabaseResponse>();
+        r.Database.Returns(database);
+        r.StatusCode.Returns(statusCode);
+        if (properties is not null)
+        {
+            r.Resource.Returns(properties);
+        }
+        return r;
+    }
+
+    public static UserResponse CreateUserResponse(
+        User user,
+        UserProperties? properties,
+        HttpStatusCode statusCode)
+    {
+        var r = Substitute.For<UserResponse>();
+        r.StatusCode.Returns(statusCode);
+        r.Resource.Returns(properties!);
+        r.User.Returns(user);
+        return r;
+    }
+
+    public static PermissionResponse CreatePermissionResponse(
+        Permission permission,
+        PermissionProperties? properties,
+        HttpStatusCode statusCode)
+    {
+        var r = Substitute.For<PermissionResponse>();
+        r.StatusCode.Returns(statusCode);
+        r.Resource.Returns(properties!);
+        r.Permission.Returns(permission);
+        return r;
+    }
+
     public static ThroughputResponse CreateThroughputResponse(
         ThroughputProperties properties,
         HttpStatusCode statusCode = HttpStatusCode.OK)
