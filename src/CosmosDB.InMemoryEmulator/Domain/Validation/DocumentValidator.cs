@@ -19,6 +19,11 @@ internal static class DocumentValidator
         "id", "_rid", "_ts", "_etag", "_self", "_attachments"
     };
 
+    private static readonly HashSet<string> ReservedSystemPatchPaths = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "/_rid", "/_ts", "/_self", "/_etag", "/_attachments"
+    };
+
     private static readonly string[] ProhibitedCpClauses =
         { " WHERE ", " ORDER BY ", " GROUP BY ", " TOP ", " DISTINCT ", " OFFSET ", " LIMIT ", " JOIN " };
 
@@ -53,6 +58,31 @@ internal static class DocumentValidator
         return !(ttlToken is not null && int.TryParse(ttlToken.ToString(), out var ttlValue) && ttlValue == 0);
     }
 
+    public static void ValidateThroughput(int? throughput, bool isAutoscale = false)
+    {
+        if (!throughput.HasValue)
+            return;
+
+        if (isAutoscale)
+        {
+            if (throughput.Value < 1000 || throughput.Value % 1000 != 0)
+            {
+                throw InMemoryCosmosException.Create(
+                    $"The autoscale maximum throughput value of {throughput.Value} must be at least 1000 and a multiple of 1000.",
+                    HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+            }
+        }
+        else
+        {
+            if (throughput.Value < 400 || throughput.Value % 100 != 0)
+            {
+                throw InMemoryCosmosException.Create(
+                    $"The throughput value of {throughput.Value} must be at least 400 and a multiple of 100.",
+                    HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+            }
+        }
+    }
+
     public static void ValidateMaxItemCount(QueryRequestOptions? requestOptions)
     {
         if (requestOptions?.MaxItemCount == 0)
@@ -84,6 +114,13 @@ internal static class DocumentValidator
         foreach (var op in operations)
         {
             var path = op.Path;
+            if (ReservedSystemPatchPaths.Contains(path))
+            {
+                throw InMemoryCosmosException.Create(
+                    $"Cannot patch system property '{path}'.",
+                    HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+            }
+
             if (string.Equals(path, "/id", StringComparison.OrdinalIgnoreCase))
             {
                 throw InMemoryCosmosException.Create(

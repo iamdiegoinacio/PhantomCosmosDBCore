@@ -1,6 +1,7 @@
 #nullable enable
 using System.Collections.Concurrent;
 using System.Net;
+using CosmosDB.InMemoryEmulator.Domain.Primitives;
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json.Linq;
 using static CosmosDB.InMemoryEmulator.Domain.Primitives.ContainerConstants;
@@ -43,7 +44,10 @@ internal static class UniqueKeyValidator
                 {
                     throw InMemoryCosmosException.Create(
                         "Unique index constraint violation.",
-                        HttpStatusCode.Conflict, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+                        HttpStatusCode.Conflict,
+                        CosmosSubStatusCodes.UniqueKeyConstraintViolation,
+                        Guid.NewGuid().ToString(),
+                        SyntheticRequestCharge);
                 }
             }
         }

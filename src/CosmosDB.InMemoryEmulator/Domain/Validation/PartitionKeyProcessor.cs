@@ -2,6 +2,7 @@
 using System.Globalization;
 using System.Net;
 using System.Text;
+using CosmosDB.InMemoryEmulator.Domain.Primitives;
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -186,30 +187,76 @@ internal static class PartitionKeyProcessor
         return "";
     }
 
+    public static void ValidatePartitionKeyPaths(IReadOnlyList<string>? partitionKeyPaths)
+    {
+        if (partitionKeyPaths is null || partitionKeyPaths.Count == 0)
+        {
+            throw InMemoryCosmosException.Create(
+                "At least one partition key path must be specified.",
+                HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+        }
+
+        if (partitionKeyPaths.Count > 3)
+        {
+            throw InMemoryCosmosException.Create(
+                "A container can define up to 3 hierarchical partition key paths.",
+                HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+        }
+
+        foreach (var path in partitionKeyPaths)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !path.StartsWith('/'))
+            {
+                throw InMemoryCosmosException.Create(
+                    $"Partition key path '{path}' is invalid. Partition key path must start with '/'.",
+                    HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+            }
+        }
+    }
+
     public static void ValidatePartitionKeyConsistency(
         PartitionKey? explicitKey, JObject jObj, IReadOnlyList<string> partitionKeyPaths)
     {
         if (!explicitKey.HasValue || explicitKey.Value == PartitionKey.None || explicitKey.Value == PartitionKey.Null)
             return;
 
-        // Only validate single-path partition keys (composite PKs have complex semantics)
-        if (partitionKeyPaths is not { Count: 1 })
+        if (partitionKeyPaths is null || partitionKeyPaths.Count == 0)
             return;
 
-        var pkPath = partitionKeyPaths[0].TrimStart('/');
-        var bodyToken = jObj.SelectToken(pkPath);
-        if (bodyToken is null)
-            return; // Field not present in body — nothing to validate
-
-        var explicitPk = PartitionKeyToString(explicitKey.Value);
-        var bodyPk = JTokenToTypedKey(bodyToken);
-
-        if (bodyPk != explicitPk)
+        if (partitionKeyPaths.Count == 1)
         {
-            throw InMemoryCosmosException.Create(
-                "PartitionKey extracted from document doesn't match the one specified in the header. " +
-                "Learn more: https://aka.ms/CosmosDB/sql/errors/wrong-pk-value",
-                HttpStatusCode.BadRequest, 1001, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+            var pkPath = partitionKeyPaths[0].TrimStart('/');
+            var bodyToken = jObj.SelectToken(pkPath);
+            if (bodyToken is null)
+                return; // Field not present in body — nothing to validate
+
+            var explicitPk = PartitionKeyToString(explicitKey.Value);
+            var bodyPk = JTokenToTypedKey(bodyToken);
+
+            if (bodyPk != explicitPk)
+            {
+                throw InMemoryCosmosException.Create(
+                    "PartitionKey extracted from document doesn't match the one specified in the header. " +
+                    "Learn more: https://aka.ms/CosmosDB/sql/errors/wrong-pk-value",
+                    HttpStatusCode.BadRequest, CosmosSubStatusCodes.PartitionKeyMismatch, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+            }
+        }
+        else
+        {
+            var anyTokenPresent = partitionKeyPaths.Any(p => jObj.SelectToken(p.TrimStart('/')) is not null);
+            if (!anyTokenPresent)
+                return;
+
+            var explicitPk = PartitionKeyToString(explicitKey.Value);
+            var bodyPk = ExtractPartitionKeyValueCore(null, jObj, partitionKeyPaths);
+
+            if (bodyPk is not null && explicitPk is not null && bodyPk != explicitPk)
+            {
+                throw InMemoryCosmosException.Create(
+                    "PartitionKey extracted from document doesn't match the one specified in the header. " +
+                    "Learn more: https://aka.ms/CosmosDB/sql/errors/wrong-pk-value",
+                    HttpStatusCode.BadRequest, CosmosSubStatusCodes.PartitionKeyMismatch, Guid.NewGuid().ToString(), SyntheticRequestCharge);
+            }
         }
     }
 
@@ -219,17 +266,31 @@ internal static class PartitionKeyProcessor
         if (!explicitKey.HasValue || explicitKey.Value == PartitionKey.None || explicitKey.Value == PartitionKey.Null)
             return true;
 
-        if (partitionKeyPaths is not { Count: 1 })
+        if (partitionKeyPaths is null || partitionKeyPaths.Count == 0)
             return true;
 
-        var pkPath = partitionKeyPaths[0].TrimStart('/');
-        var bodyToken = jObj.SelectToken(pkPath);
-        if (bodyToken is null)
-            return true;
+        if (partitionKeyPaths.Count == 1)
+        {
+            var pkPath = partitionKeyPaths[0].TrimStart('/');
+            var bodyToken = jObj.SelectToken(pkPath);
+            if (bodyToken is null)
+                return true;
 
-        var explicitPk = PartitionKeyToString(explicitKey.Value);
-        var bodyPk = JTokenToTypedKey(bodyToken);
+            var explicitPk = PartitionKeyToString(explicitKey.Value);
+            var bodyPk = JTokenToTypedKey(bodyToken);
 
-        return bodyPk == explicitPk;
+            return bodyPk == explicitPk;
+        }
+        else
+        {
+            var anyTokenPresent = partitionKeyPaths.Any(p => jObj.SelectToken(p.TrimStart('/')) is not null);
+            if (!anyTokenPresent)
+                return true;
+
+            var explicitPk = PartitionKeyToString(explicitKey.Value);
+            var bodyPk = ExtractPartitionKeyValueCore(null, jObj, partitionKeyPaths);
+
+            return bodyPk == explicitPk;
+        }
     }
 }
