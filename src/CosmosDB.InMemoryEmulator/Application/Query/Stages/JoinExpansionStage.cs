@@ -64,7 +64,7 @@ internal static class JoinExpansionStage
     public static List<string> ExpandAllJoins(IEnumerable<string> items, CosmosSqlQuery parsed)
     {
         var current = items;
-        foreach (var join in parsed.Joins)
+        foreach (var join in parsed.Joins ?? [])
         {
             var expanded = new List<string>();
             foreach (var json in current)

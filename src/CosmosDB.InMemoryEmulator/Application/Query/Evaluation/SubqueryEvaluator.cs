@@ -334,7 +334,7 @@ internal static class SubqueryEvaluator
             IOrderedEnumerable<string>? ordered = null;
             foreach (var field in subquery.OrderByFields)
             {
-                var fieldPath = field.Field;
+                var fieldPath = field.Field ?? string.Empty;
                 if (fieldPath.StartsWith(subquery.FromAlias + ".", StringComparison.OrdinalIgnoreCase))
                     fieldPath = fieldPath[(subquery.FromAlias.Length + 1)..];
 

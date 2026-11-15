@@ -73,7 +73,7 @@ internal static class OrderByStage
                     };
                 }
 
-                var fieldPath = field.Field;
+                var fieldPath = field.Field ?? string.Empty;
                 if (fieldPath.StartsWith(fromAlias + ".", StringComparison.OrdinalIgnoreCase))
                 {
                     fieldPath = fieldPath[(fromAlias.Length + 1)..];

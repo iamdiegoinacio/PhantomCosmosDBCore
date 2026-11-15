@@ -24,7 +24,8 @@ internal static class GroupByStage
             var jObj = JsonParseHelpers.ParseJson(json);
             var keyParts = new List<string>();
             var groupByExprs = parsed.GroupByExpressions;
-            for (var i = 0; i < parsed.GroupByFields.Length; i++)
+            var groupByFields = parsed.GroupByFields ?? [];
+            for (var i = 0; i < groupByFields.Length; i++)
             {
                 if (groupByExprs != null && i < groupByExprs.Length
                     && groupByExprs[i] is not IdentifierExpression
@@ -35,7 +36,7 @@ internal static class GroupByStage
                 }
                 else
                 {
-                    var path = SqlExpressionEvaluator.StripAliasPrefix(parsed.GroupByFields[i], fromAlias);
+                    var path = SqlExpressionEvaluator.StripAliasPrefix(groupByFields[i], fromAlias);
                     var token = jObj.SelectToken(path);
                     if (token is null)
                         keyParts.Add("\x00undefined");
