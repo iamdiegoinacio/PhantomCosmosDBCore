@@ -1,6 +1,7 @@
 #nullable enable
 using System.Collections.Concurrent;
 using System.Net;
+using CosmosDB.InMemoryEmulator.Application.ChangeFeed;
 using CosmosDB.InMemoryEmulator.Application.Crud;
 using CosmosDB.InMemoryEmulator.Application.Patch;
 using CosmosDB.InMemoryEmulator.Application.Query;
