@@ -11,6 +11,8 @@ namespace CosmosDB.InMemoryEmulator.Application.Query.Stages;
 /// </summary>
 internal static class OrderByStage
 {
+    private const double DefaultRrfConstantK = 60.0;
+
     public static List<string> ApplyOrderBy(IEnumerable<string> items, OrderByClause orderBy, string fromAlias)
         => ApplyOrderByFields(items, [new OrderByField(orderBy.Field, orderBy.Ascending)], fromAlias);
 
@@ -20,20 +22,77 @@ internal static class OrderByStage
         string fromAlias,
         QueryExecutionContext context)
     {
+        if (rankExpr is FunctionCallExpression rrfCall
+            && string.Equals(rrfCall.FunctionName, "RRF", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApplyReciprocalRankFusion(items, rrfCall.Arguments, fromAlias, context);
+        }
+
         return items
-            .OrderByDescending(json =>
-            {
-                var jObj = JsonParseHelpers.ParseJson(json);
-                var score = SqlExpressionEvaluator.Evaluate(rankExpr, jObj, fromAlias, context);
-                return score switch
-                {
-                    double d => d,
-                    long l => (double)l,
-                    int i => (double)i,
-                    _ => 0.0
-                };
-            })
+            .OrderByDescending(json => EvaluateNumericScore(rankExpr, JsonParseHelpers.ParseJson(json), fromAlias, context))
             .ToList();
+    }
+
+    private static List<string> ApplyReciprocalRankFusion(
+        IEnumerable<string> items,
+        SqlExpression[] rankingExpressions,
+        string fromAlias,
+        QueryExecutionContext context)
+    {
+        if (rankingExpressions.Length == 0)
+        {
+            throw new NotSupportedException("RRF() requires at least one ranking function argument.");
+        }
+
+        var docs = items
+            .Select((json, idx) => (Index: idx, Json: json, Doc: JsonParseHelpers.ParseJson(json)))
+            .ToList();
+
+        if (docs.Count <= 1)
+        {
+            return docs.Select(d => d.Json).ToList();
+        }
+
+        var rrfScores = new double[docs.Count];
+
+        foreach (var expr in rankingExpressions)
+        {
+            var rankedForFunction = docs
+                .Select(d => (d.Index, Score: EvaluateNumericScore(expr, d.Doc, fromAlias, context)))
+                .OrderByDescending(x => x.Score)
+                .ThenBy(x => x.Index)
+                .ToList();
+
+            for (var rankZeroBased = 0; rankZeroBased < rankedForFunction.Count; rankZeroBased++)
+            {
+                var docIndex = rankedForFunction[rankZeroBased].Index;
+                var oneBasedRank = rankZeroBased + 1.0;
+                rrfScores[docIndex] += 1.0 / (DefaultRrfConstantK + oneBasedRank);
+            }
+        }
+
+        return docs
+            .OrderByDescending(d => rrfScores[d.Index])
+            .ThenBy(d => d.Index)
+            .Select(d => d.Json)
+            .ToList();
+    }
+
+    private static double EvaluateNumericScore(
+        SqlExpression rankExpr,
+        JObject jObj,
+        string fromAlias,
+        QueryExecutionContext context)
+    {
+        var score = SqlExpressionEvaluator.Evaluate(rankExpr, jObj, fromAlias, context);
+        return score switch
+        {
+            double d => d,
+            long l => (double)l,
+            int i => (double)i,
+            decimal dec => (double)dec,
+            _ => 0.0
+        };
     }
 
     public static List<string> ApplyOrderByFields(

@@ -1,9 +1,9 @@
 #nullable enable
 using System.Net;
-using System.Text.RegularExpressions;
 using CosmosDB.InMemoryEmulator.Application.Query.Evaluation;
 using CosmosDB.InMemoryEmulator.Application.Query.Stages;
 using CosmosDB.InMemoryEmulator.Domain.Comparison;
+using CosmosDB.InMemoryEmulator.Domain.Validation;
 using Microsoft.Azure.Cosmos;
 
 namespace CosmosDB.InMemoryEmulator.Application.Query;
@@ -15,10 +15,6 @@ namespace CosmosDB.InMemoryEmulator.Application.Query;
 /// </summary>
 internal static class CosmosQueryPipeline
 {
-    private static readonly Regex OrderByRankRrfRegex = new(
-        @"\bORDER\s+BY\s+RANK\s+RRF\s*\(",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
     public static List<string> ExecuteSafe(Func<List<string>> queryFunc)
     {
         try
@@ -40,15 +36,13 @@ internal static class CosmosQueryPipeline
         string queryText,
         IEnumerable<string> sourceItems,
         QueryExecutionContext context,
-        (string Name, string FromAlias, SqlExpression? Expr)[] computedProps)
+        (string Name, string FromAlias, SqlExpression? Expr)[] computedProps,
+        IndexingPolicy? indexingPolicy = null)
     {
-        if (OrderByRankRrfRegex.IsMatch(queryText))
-        {
-            throw new NotSupportedException(
-                "ORDER BY RANK RRF() is not implemented in the in-memory emulator.");
-        }
-
         var parsed = CosmosSqlParser.Parse(queryText);
+        CosmosIndexingPolicyValidator.ValidateCompositeIndexesForOrderBy(
+            indexingPolicy, parsed.OrderByFields, parsed.FromAlias);
+
         IEnumerable<string> items = sourceItems;
 
         if (computedProps.Length > 0)
