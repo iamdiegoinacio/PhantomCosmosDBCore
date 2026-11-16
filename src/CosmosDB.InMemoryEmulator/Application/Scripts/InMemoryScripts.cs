@@ -169,51 +169,7 @@ internal sealed class InMemoryScripts : Microsoft.Azure.Cosmos.Scripts.Scripts
         dynamic[] parameters,
         StoredProcedureRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-    {
-        if (!_catalog.StoredProcedures.ContainsKey(storedProcedureId) &&
-            !_catalog.StoredProcedureProperties.ContainsKey(storedProcedureId))
-        {
-            throw InMemoryCosmosException.Create(
-                $"StoredProcedure '{storedProcedureId}' not found.",
-                HttpStatusCode.NotFound, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
-        }
-
-        string? handlerResult = null;
-        var hasHandler = false;
-        if (_catalog.StoredProcedures.TryGetValue(storedProcedureId, out var handler))
-        {
-            handlerResult = ExecuteHandler(storedProcedureId, () => handler(partitionKey, parameters));
-            hasHandler = true;
-        }
-        else if (_c.SprocEngine is not null
-            && _catalog.StoredProcedureProperties.TryGetValue(storedProcedureId, out var sprocProps)
-            && sprocProps.Body is not null)
-        {
-            handlerResult = ExecuteJsEngine(storedProcedureId, sprocProps.Body, partitionKey, parameters);
-            hasHandler = true;
-        }
-
-        var r = Substitute.For<StoredProcedureExecuteResponse<TOutput>>();
-        r.StatusCode.Returns(HttpStatusCode.OK);
-        r.RequestCharge.Returns(SyntheticRequestCharge);
-        if (hasHandler)
-        {
-            if (handlerResult is not null)
-            {
-                TOutput deserialized = typeof(TOutput) == typeof(string)
-                    ? (TOutput)(object)handlerResult
-                    : JsonConvert.DeserializeObject<TOutput>(handlerResult)!;
-                r.Resource.Returns(deserialized);
-            }
-            else
-            {
-                r.Resource.Returns(default(TOutput)!);
-            }
-        }
-
-        PopulateScriptLogHeaders(r);
-        return Task.FromResult(r);
-    }
+        => StoredProcedureExecutionService.ExecuteAsync<TOutput>(_c, _catalog, storedProcedureId, partitionKey, parameters);
 
     public override Task<ResponseMessage> ExecuteStoredProcedureStreamAsync(
         string storedProcedureId,
@@ -221,32 +177,7 @@ internal sealed class InMemoryScripts : Microsoft.Azure.Cosmos.Scripts.Scripts
         dynamic[] parameters,
         StoredProcedureRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-    {
-        if (!_catalog.StoredProcedures.ContainsKey(storedProcedureId) &&
-            !_catalog.StoredProcedureProperties.ContainsKey(storedProcedureId))
-        {
-            throw InMemoryCosmosException.Create(
-                $"StoredProcedure '{storedProcedureId}' not found.",
-                HttpStatusCode.NotFound, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
-        }
-
-        string? handlerResult = null;
-        if (_catalog.StoredProcedures.TryGetValue(storedProcedureId, out var handler))
-        {
-            handlerResult = ExecuteHandler(storedProcedureId, () => handler(partitionKey, parameters));
-        }
-        else if (_c.SprocEngine is not null
-            && _catalog.StoredProcedureProperties.TryGetValue(storedProcedureId, out var sprocProps)
-            && sprocProps.Body is not null)
-        {
-            handlerResult = ExecuteJsEngine(storedProcedureId, sprocProps.Body, partitionKey, parameters);
-        }
-
-        var msg = _c.CreateResponseMessage(HttpStatusCode.OK, handlerResult);
-        if (_c.SprocEngine?.CapturedLogs is { Count: > 0 } logs)
-            msg.Headers["x-ms-documentdb-script-log-results"] = Uri.EscapeDataString(string.Join("\n", logs));
-        return Task.FromResult(msg);
-    }
+        => StoredProcedureExecutionService.ExecuteStreamAsync(_c, _catalog, storedProcedureId, partitionKey, parameters);
 
     public override Task<ResponseMessage> ExecuteStoredProcedureStreamAsync(
         string storedProcedureId,
@@ -608,68 +539,5 @@ internal sealed class InMemoryScripts : Microsoft.Azure.Cosmos.Scripts.Scripts
             : null;
         return Application.Query.MetadataSqlQueryExecutor.Execute<TResult, TValue>(
             dict.Values, queryDefinition?.QueryText, parameters);
-    }
-
-    private static string? ExecuteHandler(string sprocId, Func<string> invoker)
-    {
-        string? result;
-        try
-        {
-            var task = Task.Run(invoker);
-            if (!task.Wait(TimeSpan.FromSeconds(10)))
-                throw InMemoryCosmosException.Create(
-                    $"Stored procedure '{sprocId}' exceeded the 10-second execution timeout.",
-                    HttpStatusCode.RequestTimeout, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
-            result = task.Result;
-        }
-        catch (CosmosException) { throw; }
-        catch (AggregateException ae) when (ae.InnerException is CosmosException) { throw ae.InnerException; }
-        catch (AggregateException ae)
-        {
-            var inner = ae.InnerException ?? ae;
-            throw InMemoryCosmosException.Create($"Stored procedure '{sprocId}' failed: {inner.Message}",
-                HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
-        }
-        catch (Exception ex)
-        {
-            throw InMemoryCosmosException.Create($"Stored procedure '{sprocId}' failed: {ex.Message}",
-                HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
-        }
-
-        const int MaxResponseSize = 2 * 1024 * 1024;
-        if (result != null && Encoding.UTF8.GetByteCount(result) > MaxResponseSize)
-            throw InMemoryCosmosException.Create($"Stored procedure '{sprocId}' response exceeds the 2MB size limit.",
-                (HttpStatusCode)413, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
-        return result;
-    }
-
-    private string? ExecuteJsEngine(string sprocId, string jsBody, PartitionKey pk, dynamic[] args)
-    {
-        try
-        {
-            var context = new PartitionScopedCollectionContext(_c, pk);
-            return _c.SprocEngine!.Execute(jsBody, pk, args, context);
-        }
-        catch (CosmosException) { throw; }
-        catch (Exception ex)
-        {
-            throw InMemoryCosmosException.Create($"Stored procedure '{sprocId}' failed: {ex.Message}",
-                HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
-        }
-    }
-
-    private void PopulateScriptLogHeaders<TOutput>(StoredProcedureExecuteResponse<TOutput> r)
-    {
-        if (_c.SprocEngine?.CapturedLogs is { Count: > 0 } logs)
-        {
-            var logString = Uri.EscapeDataString(string.Join("\n", logs));
-            var headers = new Headers
-            {
-                ["x-ms-request-charge"] = SyntheticRequestCharge.ToString(CultureInfo.InvariantCulture),
-                ["x-ms-documentdb-script-log-results"] = logString
-            };
-            r.Headers.Returns(headers);
-            r.ScriptLog.Returns(Uri.UnescapeDataString(logString));
-        }
     }
 }
