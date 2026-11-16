@@ -12,6 +12,38 @@ namespace CosmosDB.InMemoryEmulator.Domain.Validation;
 internal static class CosmosIndexingPolicyValidator
 {
     /// <summary>
+    /// Rejects queries that rely on indexes (WHERE, ORDER BY, or GROUP BY) when
+    /// <see cref="IndexingPolicy.IndexingMode"/> is <see cref="IndexingMode.None"/>
+    /// unless <c>EnableScanInQuery</c> is explicitly enabled.
+    /// </summary>
+    public static void ValidateIndexingModeForQuery(
+        IndexingPolicy? indexingPolicy,
+        CosmosSqlQuery parsed,
+        bool enableScanInQuery = false)
+    {
+        if (indexingPolicy?.IndexingMode != IndexingMode.None || enableScanInQuery)
+        {
+            return;
+        }
+
+        var requiresIndex = parsed.Where is not null
+                            || parsed.WhereExpr is not null
+                            || parsed.OrderBy is not null
+                            || parsed.OrderByFields is { Length: > 0 }
+                            || parsed.GroupByFields is { Length: > 0 };
+
+        if (requiresIndex)
+        {
+            throw InMemoryCosmosException.Create(
+                "The query cannot be served because IndexingMode is set to None and EnableScanInQuery is not enabled.",
+                HttpStatusCode.BadRequest,
+                CosmosSubStatusCodes.CrossPartitionQueryNotServable,
+                Guid.NewGuid().ToString(),
+                ContainerConstants.SyntheticRequestCharge);
+        }
+    }
+
+    /// <summary>
     /// Validates whether a multi-property ORDER BY clause has a matching composite index
     /// in the container's indexing policy, throwing a 400 BadRequest (SubStatusCode 1004) if not.
     /// </summary>
