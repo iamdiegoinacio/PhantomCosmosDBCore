@@ -37,9 +37,12 @@ internal static class CosmosQueryPipeline
         IEnumerable<string> sourceItems,
         QueryExecutionContext context,
         (string Name, string FromAlias, SqlExpression? Expr)[] computedProps,
-        IndexingPolicy? indexingPolicy = null)
+        IndexingPolicy? indexingPolicy = null,
+        bool enableScanInQuery = false)
     {
         var parsed = CosmosSqlParser.Parse(queryText);
+        CosmosIndexingPolicyValidator.ValidateIndexingModeForQuery(
+            indexingPolicy, parsed, enableScanInQuery);
         CosmosIndexingPolicyValidator.ValidateCompositeIndexesForOrderBy(
             indexingPolicy, parsed.OrderByFields, parsed.FromAlias);
 

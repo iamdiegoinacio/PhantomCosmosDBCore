@@ -960,6 +960,11 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         IEnumerable<string> items = preFilteredItems ?? GetAllItemsForPartition(requestOptions);
         var context = CreateQueryContext(parameters);
         return CosmosQueryPipeline.Execute(
-            queryText, items, context, GetParsedComputedProperties(), _containerProperties.IndexingPolicy);
+            queryText,
+            items,
+            context,
+            GetParsedComputedProperties(),
+            _containerProperties.IndexingPolicy,
+            requestOptions?.EnableScanInQuery ?? false);
     }
 }

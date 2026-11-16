@@ -59,6 +59,7 @@ internal static class CosmosHttpHeaders
         "x-ms-documentdb-post-trigger-include",
         "x-ms-documentdb-script-enable-logging",
         "x-ms-offer-throughput",
+        "If-Modified-Since",
     };
 
     public static string ExtractDocumentId(HttpRequestMessage request)

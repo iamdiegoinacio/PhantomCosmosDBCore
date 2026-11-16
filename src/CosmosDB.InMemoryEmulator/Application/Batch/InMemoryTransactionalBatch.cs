@@ -4,19 +4,20 @@ using System.Text;
 using CosmosDB.InMemoryEmulator.Application.Batch;
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace CosmosDB.InMemoryEmulator;
 
 /// <summary>
 /// In-memory implementation of <see cref="TransactionalBatch"/> for testing.
 /// Executes batch operations atomically against an <see cref="InMemoryContainer"/>
-/// with automatic rollback on failure.
+/// with automatic rollback on failure, or independently when <see cref="IsAtomic"/> is <c>false</c>.
 /// </summary>
 internal class InMemoryTransactionalBatch : TransactionalBatch
 {
     private readonly InMemoryContainer _container;
     private readonly PartitionKey _partitionKey;
-    private readonly List<(Func<Task> Execute, BatchOpType Type)> _operations = new();
+    private readonly List<(Func<Task> Execute, BatchOpType Type, string? TargetId)> _operations = new();
     private long _estimatedBatchSize;
     private readonly Dictionary<int, string> _readResults = new();
     private readonly Dictionary<int, string> _writeEtags = new();
@@ -41,7 +42,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
             var result = await _container.CreateItemAsync(item, _partitionKey, BatchOperationCommand.ToItemRequestOptions(requestOptions));
             _writeEtags[opIndex] = result.ETag;
             _readResults[opIndex] = JsonConvert.SerializeObject(result.Resource, BatchOperationCommand.JsonSettings);
-        }, BatchOpType.Create));
+        }, BatchOpType.Create, TryExtractId(json)));
         return this;
     }
 
@@ -56,7 +57,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
             _writeEtags[opIndex] = result.ETag;
             _opStatusCodes[opIndex] = result.StatusCode;
             _readResults[opIndex] = JsonConvert.SerializeObject(result.Resource, BatchOperationCommand.JsonSettings);
-        }, BatchOpType.Upsert));
+        }, BatchOpType.Upsert, TryExtractId(json)));
         return this;
     }
 
@@ -70,7 +71,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
             var result = await _container.ReplaceItemAsync(item, id, _partitionKey, BatchOperationCommand.ToItemRequestOptions(requestOptions));
             _writeEtags[opIndex] = result.ETag;
             _readResults[opIndex] = JsonConvert.SerializeObject(result.Resource, BatchOperationCommand.JsonSettings);
-        }, BatchOpType.Replace));
+        }, BatchOpType.Replace, id));
         return this;
     }
 
@@ -79,7 +80,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
         _estimatedBatchSize += Encoding.UTF8.GetByteCount(id) + 128;
         _operations.Add((
             async () => await _container.DeleteItemAsync<object>(id, _partitionKey, BatchOperationCommand.ToItemRequestOptions(requestOptions)),
-            BatchOpType.Delete));
+            BatchOpType.Delete, id));
         return this;
     }
 
@@ -91,7 +92,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
         {
             var result = await _container.ReadItemAsync<object>(id, _partitionKey, BatchOperationCommand.ToItemRequestOptions(requestOptions));
             _readResults[operationIndex] = JsonConvert.SerializeObject(result.Resource, BatchOperationCommand.JsonSettings);
-        }, BatchOpType.Read));
+        }, BatchOpType.Read, id));
         return this;
     }
 
@@ -107,7 +108,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
                 stream => _container.CreateItemStreamAsync(stream, _partitionKey, BatchOperationCommand.ToItemRequestOptions(requestOptions)),
                 _writeEtags,
                 _readResults),
-            BatchOpType.Create));
+            BatchOpType.Create, TryExtractId(json)));
         return this;
     }
 
@@ -124,7 +125,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
                 _writeEtags,
                 _readResults,
                 _opStatusCodes),
-            BatchOpType.Upsert));
+            BatchOpType.Upsert, TryExtractId(json)));
         return this;
     }
 
@@ -140,7 +141,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
                 stream => _container.ReplaceItemStreamAsync(stream, id, _partitionKey, BatchOperationCommand.ToItemRequestOptions(requestOptions)),
                 _writeEtags,
                 _readResults),
-            BatchOpType.Replace));
+            BatchOpType.Replace, id));
         return this;
     }
 
@@ -162,7 +163,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
             var result = await _container.PatchItemAsync<object>(id, _partitionKey, patchOperations, patchOptions);
             _writeEtags[opIndex] = result.ETag;
             _readResults[opIndex] = JsonConvert.SerializeObject(result.Resource, BatchOperationCommand.JsonSettings);
-        }, BatchOpType.Patch));
+        }, BatchOpType.Patch, id));
         return this;
     }
 
@@ -202,7 +203,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
             {
                 try
                 {
-                    var (execute, opType) = _operations[i];
+                    var (execute, opType, _) = _operations[i];
                     await execute();
                     var statusCode = opType switch
                     {
@@ -232,6 +233,27 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
                 opSubStatusCodes: _opSubStatusCodes);
         }
 
+        var duplicateIndex = FindDuplicateMutatingIdIndex();
+        if (duplicateIndex >= 0)
+        {
+            var conflictResults = new List<(HttpStatusCode status, bool isSuccess)>(_operations.Count);
+            for (var i = 0; i < _operations.Count; i++)
+            {
+                conflictResults.Add(i == duplicateIndex
+                    ? (HttpStatusCode.BadRequest, false)
+                    : (HttpStatusCode.FailedDependency, false));
+            }
+
+            return new InMemoryBatchResponse(
+                HttpStatusCode.BadRequest,
+                false,
+                conflictResults,
+                _readResults,
+                _writeEtags,
+                $"Duplicate mutating operation on item id '{_operations[duplicateIndex].TargetId}' at index {duplicateIndex} within an atomic batch.",
+                _container.CurrentSessionToken);
+        }
+
         var itemsSnapshot = _container.SnapshotItems();
         var etagsSnapshot = _container.SnapshotEtags();
         var timestampsSnapshot = _container.SnapshotTimestamps();
@@ -247,7 +269,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
         {
             try
             {
-                var (execute, opType) = _operations[i];
+                var (execute, opType, _) = _operations[i];
                 await execute();
                 var statusCode = opType switch
                 {
@@ -312,4 +334,32 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
         TransactionalBatchRequestOptions requestOptions,
         CancellationToken cancellationToken = default)
         => ExecuteAsync(cancellationToken);
+
+    private int FindDuplicateMutatingIdIndex()
+    {
+        var seenIds = new HashSet<string>(StringComparer.Ordinal);
+        for (var i = 0; i < _operations.Count; i++)
+        {
+            var (_, opType, targetId) = _operations[i];
+            if (opType == BatchOpType.Read || string.IsNullOrEmpty(targetId))
+                continue;
+
+            if (!seenIds.Add(targetId))
+                return i;
+        }
+
+        return -1;
+    }
+
+    private static string? TryExtractId(string json)
+    {
+        try
+        {
+            return JObject.Parse(json)["id"]?.ToString();
+        }
+        catch
+        {
+            return null;
+        }
+    }
 }
