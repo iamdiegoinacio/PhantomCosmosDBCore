@@ -1,6 +1,7 @@
 #nullable enable
 using System.Collections.Concurrent;
 using System.Net;
+using CosmosDB.InMemoryEmulator.Application.Account;
 using CosmosDB.InMemoryEmulator.Application.ChangeFeed;
 using CosmosDB.InMemoryEmulator.Application.Crud;
 using CosmosDB.InMemoryEmulator.Application.Patch;
@@ -610,103 +611,47 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         QueryDefinition queryDefinition,
         string? continuationToken = null,
         QueryRequestOptions? requestOptions = null)
-    {
-        DocumentValidator.ValidateMaxItemCount(requestOptions);
-        var parameters = ExtractQueryParameters(queryDefinition);
-        var filtered = CosmosQueryPipeline.ExecuteSafe(() => FilterItemsByQuery(queryDefinition.QueryText, parameters, requestOptions));
-        var items = filtered.Select(json => JsonConvert.DeserializeObject<T>(json, JsonSettings)!).ToList();
-        var initialOffset = DocumentValidator.ParseContinuationToken(continuationToken);
-        return new InMemoryFeedIterator<T>(items, requestOptions?.MaxItemCount, initialOffset)
-        {
-            PopulateIndexMetrics = requestOptions?.PopulateIndexMetrics ?? false,
-            GuaranteeFirstPage = true
-        };
-    }
+        => ContainerQueryIteratorFactory.CreateTypedIterator<T>(
+            queryDefinition, continuationToken, requestOptions, FilterItemsByQuery, JsonSettings);
 
     public override FeedIterator<T> GetItemQueryIterator<T>(
         string? queryText = null,
         string? continuationToken = null,
         QueryRequestOptions? requestOptions = null)
-    {
-        DocumentValidator.ValidateMaxItemCount(requestOptions);
-        List<T> items;
-        if (string.IsNullOrEmpty(queryText))
-        {
-            items = GetAllItemsForPartition(requestOptions)
-                .Select(json => JsonConvert.DeserializeObject<T>(json, JsonSettings)!).ToList();
-        }
-        else
-        {
-            var filtered = CosmosQueryPipeline.ExecuteSafe(() => FilterItemsByQuery(queryText, new Dictionary<string, object?>(), requestOptions));
-            items = filtered.Select(json => JsonConvert.DeserializeObject<T>(json, JsonSettings)!).ToList();
-        }
-        var initialOffset = DocumentValidator.ParseContinuationToken(continuationToken);
-        return new InMemoryFeedIterator<T>(items, requestOptions?.MaxItemCount, initialOffset)
-        {
-            PopulateIndexMetrics = requestOptions?.PopulateIndexMetrics ?? false,
-            GuaranteeFirstPage = true
-        };
-    }
+        => ContainerQueryIteratorFactory.CreateTypedIterator<T>(
+            queryText, continuationToken, requestOptions, GetAllItemsForPartition, FilterItemsByQuery, JsonSettings);
 
     public override FeedIterator<T> GetItemQueryIterator<T>(
         FeedRange feedRange,
         QueryDefinition queryDefinition,
         string? continuationToken = null,
         QueryRequestOptions? requestOptions = null)
-    {
-        DocumentValidator.ValidateMaxItemCount(requestOptions);
-        var parameters = ExtractQueryParameters(queryDefinition);
-        var preFiltered = FeedRangeCalculator.FilterByFeedRange(GetAllItemsForPartition(requestOptions).ToList(), feedRange, PartitionKeyPaths, JsonSettings);
-        var filtered = CosmosQueryPipeline.ExecuteSafe(() => FilterItemsByQuery(queryDefinition.QueryText, parameters, requestOptions, preFiltered));
-        var items = filtered.Select(json => JsonConvert.DeserializeObject<T>(json, JsonSettings)!).ToList();
-        var initialOffset = DocumentValidator.ParseContinuationToken(continuationToken);
-        return new InMemoryFeedIterator<T>(items, requestOptions?.MaxItemCount, initialOffset)
-        {
-            PopulateIndexMetrics = requestOptions?.PopulateIndexMetrics ?? false,
-            GuaranteeFirstPage = true
-        };
-    }
+        => ContainerQueryIteratorFactory.CreateTypedFeedRangeIterator<T>(
+            feedRange, queryDefinition, continuationToken, requestOptions,
+            PartitionKeyPaths, GetAllItemsForPartition, FilterItemsByQuery, JsonSettings);
 
     public override FeedIterator GetItemQueryStreamIterator(
         QueryDefinition queryDefinition,
         string? continuationToken = null,
         QueryRequestOptions? requestOptions = null)
-    {
-        var parameters = ExtractQueryParameters(queryDefinition);
-        var filtered = CosmosQueryPipeline.ExecuteSafe(() => FilterItemsByQuery(queryDefinition.QueryText, parameters, requestOptions));
-        return CosmosResponseFactory.CreateStreamFeedIterator(
-            filtered, () => CurrentSessionToken, DocumentValidator.ParseContinuationToken(continuationToken), requestOptions?.MaxItemCount);
-    }
+        => ContainerQueryIteratorFactory.CreateStreamIterator(
+            queryDefinition, continuationToken, requestOptions, FilterItemsByQuery, () => CurrentSessionToken);
 
     public override FeedIterator GetItemQueryStreamIterator(
         string? queryText = null,
         string? continuationToken = null,
         QueryRequestOptions? requestOptions = null)
-    {
-        var offset = DocumentValidator.ParseContinuationToken(continuationToken);
-        if (string.IsNullOrEmpty(queryText))
-        {
-            return CosmosResponseFactory.CreateStreamFeedIterator(
-                GetAllItemsForPartition(requestOptions).ToList(), () => CurrentSessionToken, offset, requestOptions?.MaxItemCount);
-        }
-
-        return CosmosResponseFactory.CreateStreamFeedIterator(
-            CosmosQueryPipeline.ExecuteSafe(() => FilterItemsByQuery(queryText, new Dictionary<string, object?>(), requestOptions)),
-            () => CurrentSessionToken, offset, requestOptions?.MaxItemCount);
-    }
+        => ContainerQueryIteratorFactory.CreateStreamIterator(
+            queryText, continuationToken, requestOptions, GetAllItemsForPartition, FilterItemsByQuery, () => CurrentSessionToken);
 
     public override FeedIterator GetItemQueryStreamIterator(
         FeedRange feedRange,
         QueryDefinition queryDefinition,
         string? continuationToken = null,
         QueryRequestOptions? requestOptions = null)
-    {
-        var parameters = ExtractQueryParameters(queryDefinition);
-        var preFiltered = FeedRangeCalculator.FilterByFeedRange(GetAllItemsForPartition(requestOptions).ToList(), feedRange, PartitionKeyPaths, JsonSettings);
-        var filtered = CosmosQueryPipeline.ExecuteSafe(() => FilterItemsByQuery(queryDefinition.QueryText, parameters, requestOptions, preFiltered));
-        return CosmosResponseFactory.CreateStreamFeedIterator(
-            filtered, () => CurrentSessionToken, DocumentValidator.ParseContinuationToken(continuationToken), requestOptions?.MaxItemCount);
-    }
+        => ContainerQueryIteratorFactory.CreateStreamFeedRangeIterator(
+            feedRange, queryDefinition, continuationToken, requestOptions,
+            PartitionKeyPaths, GetAllItemsForPartition, FilterItemsByQuery, JsonSettings, () => CurrentSessionToken);
 
     // ═══════════════════════════════════════════════════════════════════════════
     //  LINQ & TransactionalBatch
@@ -736,105 +681,23 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         ChangeFeedStartFrom changeFeedStartFrom,
         ChangeFeedMode changeFeedMode,
         ChangeFeedRequestOptions? changeFeedRequestOptions = null)
-    {
-        var pageSize = changeFeedRequestOptions?.PageSizeHint;
-        var typeName = changeFeedStartFrom.GetType().Name;
-        var feedRange = ExtractFeedRangeFromStartFrom(changeFeedStartFrom);
-
-        if (typeName.Contains("Now", StringComparison.OrdinalIgnoreCase) ||
-            typeName.Contains("Time", StringComparison.OrdinalIgnoreCase))
-        {
-            DateTimeOffset? capturedTimestamp = null;
-            if (typeName.Contains("Now", StringComparison.OrdinalIgnoreCase))
-            {
-                capturedTimestamp = _changeFeedLog.GetNowTimestamp();
-            }
-            else
-            {
-                var startTime = ExtractStartTime(changeFeedStartFrom);
-                if (startTime.HasValue)
-                    capturedTimestamp = new DateTimeOffset(startTime.Value, TimeSpan.Zero);
-            }
-
-            var isNowStart = typeName.Contains("Now", StringComparison.OrdinalIgnoreCase);
-            var ts = capturedTimestamp;
-            var capturedRange = feedRange;
-            return new InMemoryFeedIterator<T>(() =>
-            {
-                var entries = _changeFeedLog.GetFilteredEntries(ts, isNowStart);
-                entries = FeedRangeCalculator.FilterChangeFeedEntriesByFeedRange(entries, capturedRange);
-
-                if (changeFeedMode == ChangeFeedMode.Incremental)
-                {
-                    entries = entries
-                        .GroupBy(entry => (entry.Id, entry.PartitionKey))
-                        .Select(group => group.Last())
-                        .Where(entry => !entry.IsDelete)
-                        .ToList();
-                }
-
-                return entries
-                    .Select(entry => JsonConvert.DeserializeObject<T>(entry.Json, JsonSettings)!)
-                    .ToList();
-            }, pageSize);
-        }
-
-        var eagerEntries = _changeFeedLog.GetSnapshot();
-        eagerEntries = FeedRangeCalculator.FilterChangeFeedEntriesByFeedRange(eagerEntries, feedRange);
-
-        if (changeFeedMode == ChangeFeedMode.Incremental)
-        {
-            eagerEntries = eagerEntries
-                .GroupBy(entry => (entry.Id, entry.PartitionKey))
-                .Select(group => group.Last())
-                .Where(entry => !entry.IsDelete)
-                .ToList();
-        }
-
-        var items = eagerEntries
-            .Select(entry => JsonConvert.DeserializeObject<T>(entry.Json, JsonSettings)!)
-            .ToList();
-        return new InMemoryFeedIterator<T>(items, pageSize);
-    }
+        => ContainerChangeFeedIteratorFactory.CreateTypedIterator<T>(
+            _changeFeedLog, changeFeedStartFrom, changeFeedMode, changeFeedRequestOptions, JsonSettings);
 
     /// <summary>
     /// Returns a change feed iterator that reads changes from the given checkpoint position.
     /// Obtain a checkpoint via <see cref="GetChangeFeedCheckpoint"/>.
     /// </summary>
     public FeedIterator<T> GetChangeFeedIterator<T>(long checkpoint)
-    {
-        var items = _changeFeedLog.GetSnapshot()
-            .Skip((int)checkpoint)
-            .Select(entry => JsonConvert.DeserializeObject<T>(entry.Json, JsonSettings)!)
-            .ToList();
-        return new InMemoryFeedIterator<T>(items);
-    }
+        => ContainerChangeFeedIteratorFactory.CreateCheckpointIterator<T>(
+            _changeFeedLog, checkpoint, JsonSettings);
 
     public override FeedIterator GetChangeFeedStreamIterator(
         ChangeFeedStartFrom changeFeedStartFrom,
         ChangeFeedMode changeFeedMode,
         ChangeFeedRequestOptions? changeFeedRequestOptions = null)
-    {
-        var feedRange = ExtractFeedRangeFromStartFrom(changeFeedStartFrom);
-        var pageSizeHint = changeFeedRequestOptions?.PageSizeHint;
-        var creationTime = DateTimeOffset.UtcNow;
-        return CosmosResponseFactory.CreateStreamFeedIteratorFromFactory(() =>
-        {
-            var entries = _changeFeedLog.FilterByStartFrom(changeFeedStartFrom, creationTime);
-            entries = FeedRangeCalculator.FilterChangeFeedEntriesByFeedRange(entries, feedRange);
-
-            if (changeFeedMode == ChangeFeedMode.Incremental)
-            {
-                entries = entries
-                    .GroupBy(entry => (entry.Id, entry.PartitionKey))
-                    .Select(group => group.Last())
-                    .Where(entry => !entry.IsDelete)
-                    .ToList();
-            }
-
-            return entries.Select(entry => entry.Json).ToList();
-        }, () => CurrentSessionToken, 0, pageSizeHint);
-    }
+        => ContainerChangeFeedIteratorFactory.CreateStreamIterator(
+            _changeFeedLog, changeFeedStartFrom, changeFeedMode, changeFeedRequestOptions, () => CurrentSessionToken);
 
     public override ChangeFeedProcessorBuilder GetChangeFeedProcessorBuilder<T>(
         string processorName, Container.ChangesHandler<T> onChangesDelegate)
@@ -881,33 +744,14 @@ internal class InMemoryContainer : Container, IContainerTestSetup
     public override Task<ContainerResponse> ReadContainerAsync(
         ContainerRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_isDeleted || (!ExplicitlyCreated && _store.Items.IsEmpty))
-        {
-            throw InMemoryCosmosException.Create(
-                $"Container '{Id}' not found.",
-                HttpStatusCode.NotFound, 1003, Guid.NewGuid().ToString(), SyntheticRequestCharge);
-        }
-        _containerProperties.IndexingPolicy = IndexingPolicy;
-        _containerProperties.DefaultTimeToLive = DefaultTimeToLive;
-        return Task.FromResult(CosmosResponseFactory.CreateContainerResponse(this, _containerProperties, HttpStatusCode.OK));
-    }
+        => ContainerLifecycleService.ReadContainerAsync(
+            this, _store, _containerProperties, JsonSettings, cancellationToken);
 
     public override Task<ResponseMessage> ReadContainerStreamAsync(
         ContainerRequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-    {
-        cancellationToken.ThrowIfCancellationRequested();
-        if (_isDeleted || (!ExplicitlyCreated && _store.Items.IsEmpty))
-        {
-            return Task.FromResult(CreateResponseMessage(HttpStatusCode.NotFound));
-        }
-        _containerProperties.IndexingPolicy = IndexingPolicy;
-        _containerProperties.DefaultTimeToLive = DefaultTimeToLive;
-        return Task.FromResult(CreateResponseMessage(
-            HttpStatusCode.OK, JsonConvert.SerializeObject(_containerProperties, JsonSettings)));
-    }
+        => ContainerLifecycleService.ReadContainerStreamAsync(
+            this, _store, _containerProperties, JsonSettings, cancellationToken);
 
     public override Task<ContainerResponse> ReplaceContainerAsync(
         ContainerProperties containerProperties,
@@ -921,18 +765,9 @@ internal class InMemoryContainer : Container, IContainerTestSetup
                 $"Container id '{containerProperties.Id}' does not match the existing container id '{Id}'.",
                 HttpStatusCode.BadRequest, 0, Guid.NewGuid().ToString(), SyntheticRequestCharge);
         }
-        DocumentValidator.ValidateContainerReplace(_containerProperties, containerProperties);
-        DocumentValidator.ValidateComputedProperties(containerProperties);
-        if (_containerProperties.UniqueKeyPolicy?.UniqueKeys?.Count > 0 &&
-            (containerProperties.UniqueKeyPolicy is null || containerProperties.UniqueKeyPolicy.UniqueKeys.Count == 0))
-        {
-            containerProperties.UniqueKeyPolicy = _containerProperties.UniqueKeyPolicy;
-        }
-        _containerProperties = containerProperties;
-        _parsedComputedProperties = null;
-        DefaultTimeToLive = containerProperties.DefaultTimeToLive;
-        if (containerProperties.IndexingPolicy is not null)
-            IndexingPolicy = containerProperties.IndexingPolicy;
+
+        _containerProperties = ContainerLifecycleService.ApplyReplaceContainer(
+            this, _containerProperties, containerProperties);
         return Task.FromResult(CosmosResponseFactory.CreateContainerResponse(this, containerProperties, HttpStatusCode.OK));
     }
 
@@ -946,23 +781,14 @@ internal class InMemoryContainer : Container, IContainerTestSetup
             return Task.FromResult(CreateResponseMessage(HttpStatusCode.BadRequest));
         try
         {
-            DocumentValidator.ValidateContainerReplace(_containerProperties, containerProperties);
-            DocumentValidator.ValidateComputedProperties(containerProperties);
+            _containerProperties = ContainerLifecycleService.ApplyReplaceContainer(
+                this, _containerProperties, containerProperties);
         }
         catch (CosmosException)
         {
             return Task.FromResult(CreateResponseMessage(HttpStatusCode.BadRequest));
         }
-        if (_containerProperties.UniqueKeyPolicy?.UniqueKeys?.Count > 0 &&
-            (containerProperties.UniqueKeyPolicy is null || containerProperties.UniqueKeyPolicy.UniqueKeys.Count == 0))
-        {
-            containerProperties.UniqueKeyPolicy = _containerProperties.UniqueKeyPolicy;
-        }
-        _containerProperties = containerProperties;
-        _parsedComputedProperties = null;
-        DefaultTimeToLive = containerProperties.DefaultTimeToLive;
-        if (containerProperties.IndexingPolicy is not null)
-            IndexingPolicy = containerProperties.IndexingPolicy;
+
         return Task.FromResult(CreateResponseMessage(
             HttpStatusCode.OK, JsonConvert.SerializeObject(containerProperties, JsonSettings)));
     }
@@ -1006,21 +832,13 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         int throughput,
         RequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-    {
-        _throughput = throughput;
-        return Task.FromResult(CosmosResponseFactory.CreateThroughputResponse(
-            ThroughputProperties.CreateManualThroughput(throughput)));
-    }
+        => ContainerLifecycleService.ReplaceThroughputAsync(this, throughput);
 
     public override Task<ThroughputResponse> ReplaceThroughputAsync(
         ThroughputProperties throughputProperties,
         RequestOptions? requestOptions = null,
         CancellationToken cancellationToken = default)
-    {
-        if (throughputProperties.Throughput.HasValue)
-            _throughput = throughputProperties.Throughput.Value;
-        return Task.FromResult(CosmosResponseFactory.CreateThroughputResponse(throughputProperties));
-    }
+        => ContainerLifecycleService.ReplaceThroughputAsync(this, throughputProperties);
 
     // ═══════════════════════════════════════════════════════════════════════════
     //  Internal & Private Helpers (Batch Snapshots, Triggers, Query Context)
