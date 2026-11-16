@@ -18,7 +18,8 @@ internal static class CosmosIndexingPolicyValidator
     public static void ValidateCompositeIndexesForOrderBy(
         IndexingPolicy? indexingPolicy,
         OrderByField[]? orderByFields,
-        string? fromAlias = null)
+        string? fromAlias = null,
+        bool enforceWhenNoCompositeIndexesDefined = false)
     {
         if (orderByFields is null || orderByFields.Length <= 1)
         {
@@ -28,6 +29,11 @@ internal static class CosmosIndexingPolicyValidator
 
         if (indexingPolicy is null || indexingPolicy.CompositeIndexes is null || indexingPolicy.CompositeIndexes.Count == 0)
         {
+            if (!enforceWhenNoCompositeIndexesDefined)
+            {
+                return;
+            }
+
             throw InMemoryCosmosException.Create(
                 "The order by query does not have a corresponding composite index that it can be served from. " +
                 "Learn more: https://aka.ms/CosmosDB/sql/errors/composite-index-missing",
