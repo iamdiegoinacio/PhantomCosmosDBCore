@@ -9,8 +9,8 @@
 		<Authors>lemonlion</Authors>
 		<Copyright>Copyright (c) 2026 lemonlion</Copyright>
 		<PackageLicenseExpression>MIT</PackageLicenseExpression>
-		<PackageProjectUrl>https://github.com/iamdiegoinacio/PhantomCosmosDB</PackageProjectUrl>
-		<RepositoryUrl>https://github.com/iamdiegoinacio/PhantomCosmosDB</RepositoryUrl>
+		<PackageProjectUrl>https://github.com/iamdiegoinacio/PhantomCosmosDBCore</PackageProjectUrl>
+		<RepositoryUrl>https://github.com/iamdiegoinacio/PhantomCosmosDBCore</RepositoryUrl>
 		<RepositoryType>git</RepositoryType>
 		<PackageIcon>icon.png</PackageIcon>
 	</PropertyGroup>
