@@ -18,10 +18,6 @@ namespace CosmosDB.InMemoryEmulator.Application.Scripts;
 /// </summary>
 internal sealed class InMemoryScripts : Microsoft.Azure.Cosmos.Scripts.Scripts
 {
-    private static readonly Regex IdFilterRegex =
-        new(@"WHERE\s+c\.id\s*=\s*(?:'([^']+)'|""([^""]+)""|(@\w+))",
-            RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
     private readonly InMemoryContainer _c;
     private readonly ScriptCatalog _catalog;
 
@@ -523,59 +519,65 @@ internal sealed class InMemoryScripts : Microsoft.Azure.Cosmos.Scripts.Scripts
 
     public override FeedIterator<T> GetStoredProcedureQueryIterator<T>(
         string? queryText = null, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
-        => new InMemoryFeedIterator<T>(() => FilterById(_catalog.StoredProcedureProperties, queryText).Cast<T>().ToList());
+        => new InMemoryFeedIterator<T>(() => FilterMetadata<T, StoredProcedureProperties>(_catalog.StoredProcedureProperties, queryText));
 
     public override FeedIterator<T> GetStoredProcedureQueryIterator<T>(
         QueryDefinition queryDefinition, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
-        => new InMemoryFeedIterator<T>(() => FilterById(_catalog.StoredProcedureProperties, queryDefinition).Cast<T>().ToList());
+        => new InMemoryFeedIterator<T>(() => FilterMetadata<T, StoredProcedureProperties>(_catalog.StoredProcedureProperties, queryDefinition));
 
     public override FeedIterator<T> GetTriggerQueryIterator<T>(
         string? queryText = null, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
-        => new InMemoryFeedIterator<T>(() => FilterById(_catalog.TriggerProperties, queryText).Cast<T>().ToList());
+        => new InMemoryFeedIterator<T>(() => FilterMetadata<T, TriggerProperties>(_catalog.TriggerProperties, queryText));
 
     public override FeedIterator<T> GetTriggerQueryIterator<T>(
         QueryDefinition queryDefinition, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
-        => new InMemoryFeedIterator<T>(() => FilterById(_catalog.TriggerProperties, queryDefinition).Cast<T>().ToList());
+        => new InMemoryFeedIterator<T>(() => FilterMetadata<T, TriggerProperties>(_catalog.TriggerProperties, queryDefinition));
 
     public override FeedIterator<T> GetUserDefinedFunctionQueryIterator<T>(
         string? queryText = null, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
-        => new InMemoryFeedIterator<T>(() => FilterById(_catalog.UdfProperties, queryText).Cast<T>().ToList());
+        => new InMemoryFeedIterator<T>(() => FilterMetadata<T, UserDefinedFunctionProperties>(_catalog.UdfProperties, queryText));
 
     public override FeedIterator<T> GetUserDefinedFunctionQueryIterator<T>(
         QueryDefinition queryDefinition, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
-        => new InMemoryFeedIterator<T>(() => FilterById(_catalog.UdfProperties, queryDefinition).Cast<T>().ToList());
+        => new InMemoryFeedIterator<T>(() => FilterMetadata<T, UserDefinedFunctionProperties>(_catalog.UdfProperties, queryDefinition));
 
     // ── Query iterators (stream) ──────────────────────────────────────
 
     public override FeedIterator GetStoredProcedureQueryStreamIterator(
         string? queryText = null, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
         => new InMemoryStreamFeedIterator(
-            () => FilterById(_catalog.StoredProcedureProperties, queryText).Cast<object>().ToList(), "StoredProcedures", () => _c.CurrentSessionToken);
+            () => FilterMetadata<object, StoredProcedureProperties>(_catalog.StoredProcedureProperties, queryText),
+            "StoredProcedures", () => _c.CurrentSessionToken);
 
     public override FeedIterator GetStoredProcedureQueryStreamIterator(
         QueryDefinition queryDefinition, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
         => new InMemoryStreamFeedIterator(
-            () => FilterById(_catalog.StoredProcedureProperties, queryDefinition).Cast<object>().ToList(), "StoredProcedures", () => _c.CurrentSessionToken);
+            () => FilterMetadata<object, StoredProcedureProperties>(_catalog.StoredProcedureProperties, queryDefinition),
+            "StoredProcedures", () => _c.CurrentSessionToken);
 
     public override FeedIterator GetTriggerQueryStreamIterator(
         string? queryText = null, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
         => new InMemoryStreamFeedIterator(
-            () => FilterById(_catalog.TriggerProperties, queryText).Cast<object>().ToList(), "Triggers", () => _c.CurrentSessionToken);
+            () => FilterMetadata<object, TriggerProperties>(_catalog.TriggerProperties, queryText),
+            "Triggers", () => _c.CurrentSessionToken);
 
     public override FeedIterator GetTriggerQueryStreamIterator(
         QueryDefinition queryDefinition, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
         => new InMemoryStreamFeedIterator(
-            () => FilterById(_catalog.TriggerProperties, queryDefinition).Cast<object>().ToList(), "Triggers", () => _c.CurrentSessionToken);
+            () => FilterMetadata<object, TriggerProperties>(_catalog.TriggerProperties, queryDefinition),
+            "Triggers", () => _c.CurrentSessionToken);
 
     public override FeedIterator GetUserDefinedFunctionQueryStreamIterator(
         string? queryText = null, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
         => new InMemoryStreamFeedIterator(
-            () => FilterById(_catalog.UdfProperties, queryText).Cast<object>().ToList(), "UserDefinedFunctions", () => _c.CurrentSessionToken);
+            () => FilterMetadata<object, UserDefinedFunctionProperties>(_catalog.UdfProperties, queryText),
+            "UserDefinedFunctions", () => _c.CurrentSessionToken);
 
     public override FeedIterator GetUserDefinedFunctionQueryStreamIterator(
         QueryDefinition queryDefinition, string? continuationToken = null, QueryRequestOptions? requestOptions = null)
         => new InMemoryStreamFeedIterator(
-            () => FilterById(_catalog.UdfProperties, queryDefinition).Cast<object>().ToList(), "UserDefinedFunctions", () => _c.CurrentSessionToken);
+            () => FilterMetadata<object, UserDefinedFunctionProperties>(_catalog.UdfProperties, queryDefinition),
+            "UserDefinedFunctions", () => _c.CurrentSessionToken);
 
     // ── Private helpers ───────────────────────────────────────────────
 
@@ -594,42 +596,18 @@ internal sealed class InMemoryScripts : Microsoft.Azure.Cosmos.Scripts.Scripts
         JsonConvert.PopulateObject(jObj.ToString(), props);
     }
 
-    private static IEnumerable<TValue> FilterById<TValue>(
+    private static List<TResult> FilterMetadata<TResult, TValue>(
         Dictionary<string, TValue> dict, string? queryText)
-    {
-        var id = ExtractIdFromQueryText(queryText);
-        return id != null && dict.TryGetValue(id, out var match)
-            ? new[] { match }
-            : dict.Values;
-    }
+        => Application.Query.MetadataSqlQueryExecutor.Execute<TResult, TValue>(dict.Values, queryText);
 
-    private static IEnumerable<TValue> FilterById<TValue>(
+    private static List<TResult> FilterMetadata<TResult, TValue>(
         Dictionary<string, TValue> dict, QueryDefinition? queryDefinition)
     {
-        if (queryDefinition == null) return dict.Values;
-        var id = ExtractIdFromQueryText(queryDefinition.QueryText);
-        if (id != null && id.StartsWith("@"))
-        {
-            var parameters = CosmosSdkIntrospector.ExtractQueryParameters(queryDefinition);
-            if (parameters.TryGetValue(id, out var paramValue))
-                id = paramValue?.ToString();
-            else
-                return dict.Values;
-        }
-        return id != null && dict.TryGetValue(id, out var match)
-            ? new[] { match }
-            : dict.Values;
-    }
-
-    private static string? ExtractIdFromQueryText(string? queryText)
-    {
-        if (string.IsNullOrWhiteSpace(queryText)) return null;
-        var m = IdFilterRegex.Match(queryText);
-        if (!m.Success) return null;
-        return m.Groups[1].Success ? m.Groups[1].Value
-             : m.Groups[2].Success ? m.Groups[2].Value
-             : m.Groups[3].Success ? m.Groups[3].Value
-             : null;
+        var parameters = queryDefinition is not null
+            ? CosmosSdkIntrospector.ExtractQueryParameters(queryDefinition)
+            : null;
+        return Application.Query.MetadataSqlQueryExecutor.Execute<TResult, TValue>(
+            dict.Values, queryDefinition?.QueryText, parameters);
     }
 
     private static string? ExecuteHandler(string sprocId, Func<string> invoker)

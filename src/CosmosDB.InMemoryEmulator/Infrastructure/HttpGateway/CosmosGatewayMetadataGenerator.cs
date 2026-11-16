@@ -120,6 +120,34 @@ internal static class CosmosGatewayMetadataGenerator
             ["indexingPolicy"] = indexingPolicyObj,
             ["geospatialConfig"] = new JObject { ["type"] = "Geography" }
         };
+
+        if (container.DefaultTimeToLive.HasValue)
+        {
+            metadata["defaultTtl"] = container.DefaultTimeToLive.Value;
+        }
+
+        var uniqueKeys = container.UniqueKeyPolicy?.UniqueKeys;
+        if (uniqueKeys is { Count: > 0 })
+        {
+            metadata["uniqueKeyPolicy"] = new JObject
+            {
+                ["uniqueKeys"] = new JArray(uniqueKeys.Select(uk => new JObject
+                {
+                    ["paths"] = new JArray(uk.Paths.Select(p => (JToken)p))
+                }))
+            };
+        }
+
+        var computedProperties = container.ContainerPropertiesInternal.ComputedProperties;
+        if (computedProperties is { Count: > 0 })
+        {
+            metadata["computedProperties"] = new JArray(computedProperties.Select(cp => new JObject
+            {
+                ["name"] = cp.Name,
+                ["query"] = cp.Query
+            }));
+        }
+
         return metadata.ToString(Formatting.None);
     }
 

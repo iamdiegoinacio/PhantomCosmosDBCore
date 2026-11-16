@@ -303,6 +303,30 @@ internal sealed class CosmosRoutingMessageHandler : HttpMessageHandler
             {
                 container.DefaultTimeToLive = null;
             }
+
+            var replacedProps = JsonConvert.DeserializeObject<ContainerProperties>(body);
+            if (replacedProps is not null)
+            {
+                if (replacedProps.IndexingPolicy is not null && props["indexingPolicy"] is not null)
+                {
+                    container.IndexingPolicy = replacedProps.IndexingPolicy;
+                }
+
+                if (replacedProps.UniqueKeyPolicy is not null && props["uniqueKeyPolicy"] is not null)
+                {
+                    container.UniqueKeyPolicy = replacedProps.UniqueKeyPolicy;
+                }
+
+                if (props["computedProperties"] is not null)
+                {
+                    container.ContainerPropertiesInternal.ComputedProperties.Clear();
+                    foreach (var cp in replacedProps.ComputedProperties)
+                    {
+                        container.ContainerPropertiesInternal.ComputedProperties.Add(cp);
+                    }
+                    container.ResetComputedPropertiesCache();
+                }
+            }
         }
 
         return CreateContainerMetadataResponse(handler, HttpStatusCode.OK);
