@@ -32,6 +32,7 @@ public class FakeCosmosHandler : HttpMessageHandler
     private readonly string _partitionKeyPath;
     private readonly IQueryPlanStrategy _queryPlanStrategy;
     private readonly IBatchSchemaStrategy _batchSchemaStrategy;
+    private readonly GatewayUsersRouteHandler _usersHandler = new();
 
     /// <summary>
     /// The version of the <c>PartitionedQueryExecutionInfo</c> format returned by query plan responses.
@@ -218,6 +219,12 @@ public class FakeCosmosHandler : HttpMessageHandler
             return scriptsResponse;
         }
 
+        var usersResponse = await _usersHandler.TryHandleAsync(request, _container.CurrentSessionToken, cancellationToken);
+        if (usersResponse is not null)
+        {
+            return usersResponse;
+        }
+
         if (method == "GET" && path.Contains("/colls/") && !path.Contains("/docs"))
         {
             return CosmosHttpHeaders.CreateJsonResponse(
@@ -370,7 +377,7 @@ public class FakeCosmosHandler : HttpMessageHandler
         var pk = CosmosHttpHeaders.ExtractPartitionKey(request) ?? PartitionKey.None;
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(body));
         var result = await _container.CreateItemStreamAsync(stream, pk, CosmosHttpHeaders.BuildItemRequestOptions(request), cancellationToken);
-        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken);
+        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken, CosmosHttpHeaders.ChargeKind.Write);
     }
 
     private async Task<HttpResponseMessage> HandleUpsertAsync(
@@ -380,7 +387,7 @@ public class FakeCosmosHandler : HttpMessageHandler
         var pk = CosmosHttpHeaders.ExtractPartitionKey(request) ?? PartitionKey.None;
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(body));
         var result = await _container.UpsertItemStreamAsync(stream, pk, CosmosHttpHeaders.BuildItemRequestOptions(request), cancellationToken);
-        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken);
+        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken, CosmosHttpHeaders.ChargeKind.Write);
     }
 
     private async Task<HttpResponseMessage> HandlePointReadAsync(
@@ -389,7 +396,7 @@ public class FakeCosmosHandler : HttpMessageHandler
         var id = CosmosHttpHeaders.ExtractDocumentId(request);
         var pk = CosmosHttpHeaders.ExtractPartitionKey(request) ?? PartitionKey.None;
         var result = await _container.ReadItemStreamAsync(id, pk, CosmosHttpHeaders.BuildItemRequestOptions(request), cancellationToken);
-        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken);
+        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken, CosmosHttpHeaders.ChargeKind.Read);
     }
 
     private async Task<HttpResponseMessage> HandleReplaceAsync(
@@ -400,7 +407,7 @@ public class FakeCosmosHandler : HttpMessageHandler
         var pk = CosmosHttpHeaders.ExtractPartitionKey(request) ?? PartitionKey.None;
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(body));
         var result = await _container.ReplaceItemStreamAsync(stream, id, pk, CosmosHttpHeaders.BuildItemRequestOptions(request), cancellationToken);
-        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken);
+        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken, CosmosHttpHeaders.ChargeKind.Write);
     }
 
     private async Task<HttpResponseMessage> HandleDeleteAsync(
@@ -409,7 +416,7 @@ public class FakeCosmosHandler : HttpMessageHandler
         var id = CosmosHttpHeaders.ExtractDocumentId(request);
         var pk = CosmosHttpHeaders.ExtractPartitionKey(request) ?? PartitionKey.None;
         var result = await _container.DeleteItemStreamAsync(id, pk, CosmosHttpHeaders.BuildItemRequestOptions(request), cancellationToken);
-        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken);
+        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken, CosmosHttpHeaders.ChargeKind.Write);
     }
 
     private async Task<HttpResponseMessage> HandlePatchAsync(
@@ -429,7 +436,7 @@ public class FakeCosmosHandler : HttpMessageHandler
             options.IfMatchEtag = request.Headers.IfMatch.First().Tag;
         }
         var result = await _container.PatchItemStreamAsync(id, pk, operations, options, cancellationToken);
-        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken);
+        return CosmosHttpHeaders.ConvertToHttpResponse(result, _container.CurrentSessionToken, CosmosHttpHeaders.ChargeKind.Write);
     }
 
     internal static HttpMessageHandler CreateRouter(

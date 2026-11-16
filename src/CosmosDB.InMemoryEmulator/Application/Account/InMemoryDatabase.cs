@@ -299,19 +299,9 @@ internal class InMemoryDatabase : Database
         QueryRequestOptions? requestOptions = null)
     {
         var offset = int.TryParse(continuationToken, out var o) ? o : 0;
-        IEnumerable<ContainerProperties> items = _containers.Values
-            .Select(c => new ContainerProperties(c.Id, c.PartitionKeyPaths));
-        var idFilter = CosmosResourceNameValidator.ExtractIdFilter(queryText);
-        if (idFilter is not null)
-            items = items.Where(cp => string.Equals(cp.Id, idFilter, StringComparison.Ordinal));
-
-        if (typeof(T) != typeof(ContainerProperties) && CosmosResourceNameValidator.IsSelectValueIdQuery(queryText))
-        {
-            var ids = items.Select(cp => (T)(object)cp.Id).ToList();
-            return new InMemoryFeedIterator<T>(ids, requestOptions?.MaxItemCount, offset);
-        }
-
-        return new InMemoryFeedIterator<T>(items.Select(cp => (T)(object)cp).ToList(), requestOptions?.MaxItemCount, offset);
+        var items = _containers.Values.Select(c => new ContainerProperties(c.Id, c.PartitionKeyPaths));
+        var results = Application.Query.MetadataSqlQueryExecutor.Execute<T, ContainerProperties>(items, queryText);
+        return new InMemoryFeedIterator<T>(results, requestOptions?.MaxItemCount, offset);
     }
 
     public override FeedIterator<T> GetContainerQueryIterator<T>(
@@ -319,7 +309,14 @@ internal class InMemoryDatabase : Database
         string? continuationToken = null,
         QueryRequestOptions? requestOptions = null)
     {
-        return GetContainerQueryIterator<T>(queryDefinition?.QueryText, continuationToken, requestOptions);
+        var offset = int.TryParse(continuationToken, out var o) ? o : 0;
+        var items = _containers.Values.Select(c => new ContainerProperties(c.Id, c.PartitionKeyPaths));
+        var parameters = queryDefinition is not null
+            ? Infrastructure.SdkInterop.CosmosSdkIntrospector.ExtractQueryParameters(queryDefinition)
+            : null;
+        var results = Application.Query.MetadataSqlQueryExecutor.Execute<T, ContainerProperties>(
+            items, queryDefinition?.QueryText, parameters);
+        return new InMemoryFeedIterator<T>(results, requestOptions?.MaxItemCount, offset);
     }
 
     public override Task<DatabaseResponse> ReadAsync(

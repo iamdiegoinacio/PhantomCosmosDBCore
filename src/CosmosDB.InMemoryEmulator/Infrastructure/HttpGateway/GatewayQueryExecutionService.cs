@@ -2,6 +2,7 @@
 using System.Collections.Concurrent;
 using System.Net;
 using System.Text;
+using CosmosDB.InMemoryEmulator.Application.ChangeFeed;
 using Microsoft.Azure.Cosmos;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
@@ -396,21 +397,31 @@ internal sealed class GatewayQueryExecutionService
 
         var iterator = _container.GetChangeFeedIterator<JObject>(checkpoint);
         var allChanges = new List<JObject>();
-        while (iterator.HasMoreResults)
+        if (CosmosHttpHeaders.IsFullFidelityChangeFeedRequest(request))
         {
-            var page = await iterator.ReadNextAsync();
-            if (page.StatusCode == HttpStatusCode.NotModified)
-                break;
-            allChanges.AddRange(page);
+            var envelopes = FullFidelityChangeFeedProjector.Project(
+                _container.GetChangeFeedEntries(), (int)Math.Min(checkpoint, int.MaxValue));
+            allChanges.AddRange(envelopes);
         }
+        else
+        {
+            while (iterator.HasMoreResults)
+            {
+                var page = await iterator.ReadNextAsync();
+                if (page.StatusCode == HttpStatusCode.NotModified)
+                    break;
+                allChanges.AddRange(page);
+            }
+        }
+
         var totalChanges = allChanges.Count;
 
         if (request.Headers.IfModifiedSince is { } modifiedSince)
         {
             var sinceEpoch = modifiedSince.ToUnixTimeSeconds();
             allChanges = allChanges
-                .Where(change => change["_ts"]?.Type is not JTokenType.Integer
-                                 || change["_ts"]!.Value<long>() >= sinceEpoch)
+                .Where(change => (change["_ts"] ?? change["metadata"]?["crts"])?.Type is not JTokenType.Integer
+                                 || (change["_ts"] ?? change["metadata"]!["crts"])!.Value<long>() >= sinceEpoch)
                 .ToList();
         }
 
@@ -487,6 +498,11 @@ internal sealed class GatewayQueryExecutionService
 
         var targetDoc = payloadPropertyName is not null && obj[payloadPropertyName] is JObject payload
             ? payload : obj;
+        if (obj["metadata"] is JObject && obj["current"] is JObject current)
+        {
+            // Full-fidelity change feed envelope: route by the live image, or the previous image for deletes.
+            targetDoc = current.HasValues ? current : obj["previous"] as JObject ?? current;
+        }
         var pkToken = targetDoc.SelectToken(_partitionKeyPath);
         var pkValue = pkToken is not null ? InMemoryContainer.JTokenToTypedKey(pkToken) ?? "" : "";
         return PartitionKeyHash.GetRangeIndex(pkValue, _partitionKeyRangeCount);
@@ -523,7 +539,11 @@ internal sealed class GatewayQueryExecutionService
             Content = new StringContent(responseBody.ToString(), Encoding.UTF8, "application/json")
         };
 
-        response.Headers.Add("x-ms-request-charge", "1");
+        var pageCharge = CosmosDB.InMemoryEmulator.Domain.Primitives.RequestChargeCalculator.Query(
+            paged.Count, Encoding.UTF8.GetByteCount(responseBody.ToString(Formatting.None)));
+        response.Headers.Add(
+            "x-ms-request-charge",
+            pageCharge.ToString(System.Globalization.CultureInfo.InvariantCulture));
         response.Headers.Add("x-ms-activity-id", Guid.NewGuid().ToString());
         response.Headers.Add("x-ms-session-token", _container.CurrentSessionToken);
         response.Headers.Add("x-ms-item-count", paged.Count.ToString());

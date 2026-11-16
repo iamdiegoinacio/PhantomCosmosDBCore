@@ -172,12 +172,9 @@ internal class InMemoryCosmosClient : CosmosClient
         QueryRequestOptions? requestOptions = null)
     {
         var offset = int.TryParse(continuationToken, out var o) ? o : 0;
-        IEnumerable<DatabaseProperties> items = _databases.Values
-            .Select(db => new DatabaseProperties(db.Id));
-        var idFilter = CosmosResourceNameValidator.ExtractIdFilter(queryText);
-        if (idFilter is not null)
-            items = items.Where(d => string.Equals(d.Id, idFilter, StringComparison.Ordinal));
-        return new InMemoryFeedIterator<T>(items.Cast<T>().ToList(), requestOptions?.MaxItemCount, offset);
+        var items = _databases.Values.Select(db => new DatabaseProperties(db.Id));
+        var results = Application.Query.MetadataSqlQueryExecutor.Execute<T, DatabaseProperties>(items, queryText);
+        return new InMemoryFeedIterator<T>(results, requestOptions?.MaxItemCount, offset);
     }
 
     public override FeedIterator<T> GetDatabaseQueryIterator<T>(
@@ -185,7 +182,14 @@ internal class InMemoryCosmosClient : CosmosClient
         string? continuationToken = null,
         QueryRequestOptions? requestOptions = null)
     {
-        return GetDatabaseQueryIterator<T>(queryDefinition?.QueryText, continuationToken, requestOptions);
+        var offset = int.TryParse(continuationToken, out var o) ? o : 0;
+        var items = _databases.Values.Select(db => new DatabaseProperties(db.Id));
+        var parameters = queryDefinition is not null
+            ? Infrastructure.SdkInterop.CosmosSdkIntrospector.ExtractQueryParameters(queryDefinition)
+            : null;
+        var results = Application.Query.MetadataSqlQueryExecutor.Execute<T, DatabaseProperties>(
+            items, queryDefinition?.QueryText, parameters);
+        return new InMemoryFeedIterator<T>(results, requestOptions?.MaxItemCount, offset);
     }
 
     public override FeedIterator GetDatabaseQueryStreamIterator(

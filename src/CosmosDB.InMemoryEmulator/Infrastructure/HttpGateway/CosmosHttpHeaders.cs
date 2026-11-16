@@ -157,7 +157,16 @@ internal static class CosmosHttpHeaders
         {
             return false;
         }
-        return values.Any(v => v.Contains("Incremental", StringComparison.OrdinalIgnoreCase));
+        return values.Any(v => v.Contains("Incremental", StringComparison.OrdinalIgnoreCase)
+                               || v.Contains("Full-Fidelity", StringComparison.OrdinalIgnoreCase)
+                               || v.Contains("AllVersionsAndDeletes", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public static bool IsFullFidelityChangeFeedRequest(HttpRequestMessage request)
+    {
+        return request.Headers.TryGetValues("A-IM", out var values)
+               && values.Any(v => v.Contains("Full-Fidelity", StringComparison.OrdinalIgnoreCase)
+                                  || v.Contains("AllVersionsAndDeletes", StringComparison.OrdinalIgnoreCase));
     }
 
     public static (IReadOnlyList<PatchOperation> Operations, string? Condition) ParsePatchBody(string body)
@@ -305,15 +314,27 @@ internal static class CosmosHttpHeaders
         return Convert.ToBase64String(Encoding.UTF8.GetBytes(json));
     }
 
-    public static HttpResponseMessage ConvertToHttpResponse(ResponseMessage cosmosResponse, string sessionToken)
+    internal enum ChargeKind
+    {
+        Flat,
+        Read,
+        Write,
+    }
+
+    public static HttpResponseMessage ConvertToHttpResponse(
+        ResponseMessage cosmosResponse,
+        string sessionToken,
+        ChargeKind chargeKind = ChargeKind.Flat)
     {
         var httpResponse = new HttpResponseMessage(cosmosResponse.StatusCode);
+        long payloadBytes = 0;
         if (cosmosResponse.Content is not null)
         {
             using var reader = new StreamReader(cosmosResponse.Content);
             var json = reader.ReadToEnd();
             if (json.Length > 0)
             {
+                payloadBytes = Encoding.UTF8.GetByteCount(json);
                 httpResponse.Content = new StringContent(json, Encoding.UTF8, "application/json");
             }
         }
@@ -327,7 +348,13 @@ internal static class CosmosHttpHeaders
                 BuildErrorBody(cosmosResponse.StatusCode, message), Encoding.UTF8, "application/json");
         }
 
-        httpResponse.Headers.Add("x-ms-request-charge", "1");
+        var charge = chargeKind switch
+        {
+            ChargeKind.Read when payloadBytes > 0 => CosmosDB.InMemoryEmulator.Domain.Primitives.RequestChargeCalculator.PointRead(payloadBytes),
+            ChargeKind.Write => CosmosDB.InMemoryEmulator.Domain.Primitives.RequestChargeCalculator.Write(payloadBytes),
+            _ => 1d
+        };
+        httpResponse.Headers.Add("x-ms-request-charge", charge.ToString(System.Globalization.CultureInfo.InvariantCulture));
         httpResponse.Headers.Add("x-ms-activity-id", cosmosResponse.Headers["x-ms-activity-id"] ?? Guid.NewGuid().ToString());
         httpResponse.Headers.Add("x-ms-session-token", sessionToken);
 

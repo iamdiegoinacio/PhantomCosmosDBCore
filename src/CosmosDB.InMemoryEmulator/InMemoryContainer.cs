@@ -210,6 +210,10 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         set => _containerProperties.UniqueKeyPolicy = value ?? new UniqueKeyPolicy();
     }
 
+    internal ContainerProperties ContainerPropertiesInternal => _containerProperties;
+
+    internal void ResetComputedPropertiesCache() => _parsedComputedProperties = null;
+
     /// <summary>The partition key path(s) for this container.</summary>
     public IReadOnlyList<string> PartitionKeyPaths { get; }
 
@@ -1045,6 +1049,9 @@ internal class InMemoryContainer : Container, IContainerTestSetup
         => _store.SnapshotTimestamps();
 
     internal int GetChangeFeedCount() => _changeFeedLog.Count;
+
+    internal List<(DateTimeOffset Timestamp, string Id, string PartitionKey, string Json, bool IsDelete)> GetChangeFeedEntries()
+        => _changeFeedLog.GetSnapshot();
 
     internal void BeginBatchTracking() => InMemoryItemStore.BeginBatchTracking();
 
