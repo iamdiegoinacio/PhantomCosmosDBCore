@@ -19,6 +19,7 @@ internal sealed class InMemoryBatchResponse : TransactionalBatchResponse
     private readonly List<(HttpStatusCode status, bool isSuccess)> _operationResults;
     private readonly Dictionary<int, string> _readResults;
     private readonly Dictionary<int, string> _writeEtags;
+    private readonly Dictionary<int, int> _opSubStatusCodes;
     private readonly string? _errorMessage;
     private readonly Headers _headers = new();
 
@@ -29,18 +30,31 @@ internal sealed class InMemoryBatchResponse : TransactionalBatchResponse
         Dictionary<int, string> readResults,
         Dictionary<int, string> writeEtags,
         string? errorMessage = null,
-        string? sessionToken = null)
+        string? sessionToken = null,
+        int subStatusCode = 0,
+        Dictionary<int, int>? opSubStatusCodes = null)
     {
         _statusCode = statusCode;
         _isSuccess = isSuccess;
         _operationResults = operationResults;
         _readResults = readResults;
         _writeEtags = writeEtags;
+        _opSubStatusCodes = opSubStatusCodes ?? new Dictionary<int, int>();
         _errorMessage = errorMessage;
+        BatchSubStatusCode = subStatusCode;
         _headers["x-ms-activity-id"] = ActivityId;
         _headers["x-ms-request-charge"] = RequestCharge.ToString(CultureInfo.InvariantCulture);
         _headers["x-ms-session-token"] = sessionToken ?? "0:0#0";
+        if (subStatusCode != 0)
+        {
+            _headers["x-ms-substatus"] = subStatusCode.ToString(CultureInfo.InvariantCulture);
+        }
     }
+
+    public int BatchSubStatusCode { get; }
+
+    public int GetOperationSubStatusCode(int index)
+        => _opSubStatusCodes.TryGetValue(index, out var subStatus) ? subStatus : 0;
 
     public override HttpStatusCode StatusCode => _statusCode;
     public override bool IsSuccessStatusCode => _isSuccess;

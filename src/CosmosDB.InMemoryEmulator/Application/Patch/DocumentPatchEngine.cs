@@ -222,7 +222,16 @@ internal static class DocumentPatchEngine
 
             jObj = executePreTriggers(requestOptions, jObj, "Replace");
 
-            PatchOperationApplier.ApplyPatchOperations(jObj, patchOperations);
+            try
+            {
+                PatchOperationApplier.ApplyPatchOperations(jObj, patchOperations);
+            }
+            catch (CosmosException ex)
+            {
+                return CosmosResponseFactory.CreateResponseMessage(
+                    ex.StatusCode, changeFeedLog.CurrentSessionToken, subStatusCode: ex.SubStatusCode);
+            }
+
             var updatedJson = jObj.ToString(Formatting.None);
             if (!DocumentValidator.IsDocumentSizeValid(updatedJson))
             {
@@ -248,7 +257,9 @@ internal static class DocumentPatchEngine
                         containerProperties.UniqueKeyPolicy, store.Items, jObj, pk, excludeItemId: id))
                     {
                         return CosmosResponseFactory.CreateResponseMessage(
-                            HttpStatusCode.Conflict, changeFeedLog.CurrentSessionToken);
+                            HttpStatusCode.Conflict,
+                            changeFeedLog.CurrentSessionToken,
+                            subStatusCode: CosmosSubStatusCodes.UniqueKeyConstraintViolation);
                     }
                     etag = ETagValue.GenerateNextString();
                     store.Etags[key] = etag;

@@ -21,6 +21,9 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
     private readonly Dictionary<int, string> _readResults = new();
     private readonly Dictionary<int, string> _writeEtags = new();
     private readonly Dictionary<int, HttpStatusCode> _opStatusCodes = new();
+    private readonly Dictionary<int, int> _opSubStatusCodes = new();
+
+    public bool IsAtomic { get; set; } = true;
 
     public InMemoryTransactionalBatch(InMemoryContainer container, PartitionKey partitionKey)
     {
@@ -192,6 +195,43 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
                 _container.CurrentSessionToken);
         }
 
+        if (!IsAtomic)
+        {
+            var bulkResults = new List<(HttpStatusCode status, bool isSuccess)>(_operations.Count);
+            for (var i = 0; i < _operations.Count; i++)
+            {
+                try
+                {
+                    var (execute, opType) = _operations[i];
+                    await execute();
+                    var statusCode = opType switch
+                    {
+                        BatchOpType.Read => HttpStatusCode.OK,
+                        BatchOpType.Delete => HttpStatusCode.NoContent,
+                        BatchOpType.Replace => HttpStatusCode.OK,
+                        BatchOpType.Patch => HttpStatusCode.OK,
+                        BatchOpType.Upsert => _opStatusCodes.TryGetValue(i, out var sc) ? sc : HttpStatusCode.Created,
+                        _ => HttpStatusCode.Created
+                    };
+                    bulkResults.Add((statusCode, true));
+                }
+                catch (CosmosException ex)
+                {
+                    _opSubStatusCodes[i] = ex.SubStatusCode;
+                    bulkResults.Add((ex.StatusCode, false));
+                }
+            }
+
+            return new InMemoryBatchResponse(
+                HttpStatusCode.OK,
+                true,
+                bulkResults,
+                _readResults,
+                _writeEtags,
+                sessionToken: _container.CurrentSessionToken,
+                opSubStatusCodes: _opSubStatusCodes);
+        }
+
         var itemsSnapshot = _container.SnapshotItems();
         var etagsSnapshot = _container.SnapshotEtags();
         var timestampsSnapshot = _container.SnapshotTimestamps();
@@ -201,6 +241,7 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
         var operationResults = new List<(HttpStatusCode status, bool isSuccess)>();
         var failedIndex = -1;
         HttpStatusCode failedStatusCode = default;
+        var failedSubStatusCode = 0;
 
         for (var i = 0; i < _operations.Count; i++)
         {
@@ -223,6 +264,8 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
             {
                 failedIndex = i;
                 failedStatusCode = ex.StatusCode;
+                failedSubStatusCode = ex.SubStatusCode;
+                _opSubStatusCodes[i] = ex.SubStatusCode;
                 operationResults.Add((ex.StatusCode, false));
                 break;
             }
@@ -249,7 +292,9 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
                 _readResults,
                 _writeEtags,
                 $"Batch operation at index {failedIndex} failed with status code {(int)failedStatusCode}.",
-                _container.CurrentSessionToken);
+                _container.CurrentSessionToken,
+                failedSubStatusCode,
+                _opSubStatusCodes);
         }
 
         _container.EndBatchTracking();
@@ -259,7 +304,8 @@ internal class InMemoryTransactionalBatch : TransactionalBatch
             operationResults,
             _readResults,
             _writeEtags,
-            sessionToken: _container.CurrentSessionToken);
+            sessionToken: _container.CurrentSessionToken,
+            opSubStatusCodes: _opSubStatusCodes);
     }
 
     public override Task<TransactionalBatchResponse> ExecuteAsync(

@@ -91,10 +91,16 @@ internal static class BatchOperationCommand
         var response = await executeStreamAsync(stream);
         if (!response.IsSuccessStatusCode)
         {
+            var subStatusCode = 0;
+            if (int.TryParse(response.Headers["x-ms-substatus"], out var parsedSubStatus))
+            {
+                subStatusCode = parsedSubStatus;
+            }
+
             throw InMemoryCosmosException.Create(
                 response.ErrorMessage ?? "Stream operation failed.",
                 response.StatusCode,
-                0,
+                subStatusCode,
                 string.Empty,
                 0);
         }

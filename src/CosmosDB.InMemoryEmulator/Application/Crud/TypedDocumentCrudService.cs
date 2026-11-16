@@ -32,11 +32,9 @@ internal static class TypedDocumentCrudService
         json = jObj.ToString(Formatting.None);
         DocumentValidator.ValidateDocumentSize(json);
 
-        var itemId = jObj["id"]?.ToString() ?? throw new InvalidOperationException("Item must have an 'id' property.");
-        if (itemId.Length == 0)
-        {
-            throw DocumentExceptions.BadRequest("The 'id' property cannot be an empty string.");
-        }
+        var rawItemId = jObj["id"]?.ToString();
+        CosmosResourceNameValidator.ValidateDocumentId(rawItemId);
+        var itemId = rawItemId!;
 
         PartitionKeyProcessor.ValidatePartitionKeyConsistency(partitionKey, jObj, context.PartitionKeyPaths);
         DocumentValidator.ValidatePerItemTtl(jObj);
@@ -122,7 +120,9 @@ internal static class TypedDocumentCrudService
         json = jObj.ToString(Formatting.None);
         DocumentValidator.ValidateDocumentSize(json);
 
-        var itemId = jObj["id"]?.ToString() ?? throw new InvalidOperationException("Item must have an 'id' property.");
+        var rawItemId = jObj["id"]?.ToString();
+        CosmosResourceNameValidator.ValidateDocumentId(rawItemId);
+        var itemId = rawItemId!;
         PartitionKeyProcessor.ValidatePartitionKeyConsistency(partitionKey, jObj, context.PartitionKeyPaths);
         DocumentValidator.ValidatePerItemTtl(jObj);
         var pk = PartitionKeyProcessor.ExtractPartitionKeyValue(partitionKey, jObj, context.PartitionKeyPaths);
@@ -181,6 +181,7 @@ internal static class TypedDocumentCrudService
         var store = context.Store;
         var (json, jObj) = SerializeAndParse(context, item);
 
+        CosmosResourceNameValidator.ValidateDocumentId(id);
         var bodyId = jObj["id"]?.ToString();
         if (bodyId is not null && bodyId != id)
         {
