@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<PackageId>Phantom.CosmosDB.ProductionExtensions</PackageId>
+		<Description>Production extensions for Phantom.CosmosDB.Core.</Description>
+		<AzureCosmosDisableNewtonsoftJsonCheck>true</AzureCosmosDisableNewtonsoftJsonCheck>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Azure.Cosmos" Version="$(CosmosSDKVersion)" />
+	</ItemGroup>
+
+</Project>

@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<PackageId>Phantom.CosmosDB.JsTriggers</PackageId>
+		<Description>JavaScript trigger, UDF, and stored procedure engine for Phantom.CosmosDB.Core using Jint.</Description>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Jint" Version="4.2.1" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Phantom.CosmosDB.Core\Phantom.CosmosDB.Core.csproj" />
+		<Using Include="Phantom.CosmosDB.Core" />
+	</ItemGroup>
+
+</Project>

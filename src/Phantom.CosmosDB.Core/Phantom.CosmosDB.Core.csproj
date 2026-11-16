@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+	<PropertyGroup>
+		<PackageId>Phantom.CosmosDB.Core</PackageId>
+		<Description>High-fidelity in-memory Azure Cosmos DB core engine for CosmosPhantom.</Description>
+		<IsPackable>false</IsPackable>
+	</PropertyGroup>
+
+	<ItemGroup>
+		<InternalsVisibleTo Include="Phantom.CosmosDB" />
+		<InternalsVisibleTo Include="Phantom.CosmosDB.JsTriggers" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<PackageReference Include="Microsoft.Azure.Cosmos" Version="$(CosmosSDKVersion)" />
+		<PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="8.0.2" />
+		<PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+		<PackageReference Include="NSubstitute" Version="5.3.0" />
+		<PackageReference Include="Superpower" Version="3.1.0" />
+	</ItemGroup>
+
+	<ItemGroup>
+		<Reference Include="Microsoft.Azure.Cosmos.Serialization.HybridRow">
+			<HintPath>$(NuGetPackageRoot)microsoft.azure.cosmos\$(CosmosSDKVersion)\lib\netstandard2.0\Microsoft.Azure.Cosmos.Serialization.HybridRow.dll</HintPath>
+			<Private>false</Private>
+		</Reference>
+	</ItemGroup>
+
+	<ItemGroup>
+		<ProjectReference Include="..\Phantom.CosmosDB.ProductionExtensions\Phantom.CosmosDB.ProductionExtensions.csproj" PrivateAssets="All" />
+	</ItemGroup>
+
+</Project>
