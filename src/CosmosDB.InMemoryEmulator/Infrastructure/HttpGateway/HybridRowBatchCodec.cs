@@ -1,7 +1,9 @@
 #nullable enable
+using System.Globalization;
 using System.Net;
 using System.Reflection;
 using System.Text;
+using CosmosDB.InMemoryEmulator.Application.Batch;
 using Microsoft.Azure.Cosmos;
 using Microsoft.Azure.Cosmos.Serialization.HybridRow;
 using Microsoft.Azure.Cosmos.Serialization.HybridRow.IO;
@@ -246,7 +248,30 @@ internal static class HybridRowBatchCodec
             };
         }
 
+        var isAtomic = true;
+        if (request.Headers.TryGetValues("x-ms-cosmos-batch-atomic", out var atomicValues))
+        {
+            var atomicStr = atomicValues.FirstOrDefault();
+            if (string.Equals(atomicStr, "false", StringComparison.OrdinalIgnoreCase))
+            {
+                isAtomic = false;
+            }
+        }
+        if (request.Headers.TryGetValues("x-ms-cosmos-batch-continue-on-error", out var continueValues))
+        {
+            var continueStr = continueValues.FirstOrDefault();
+            if (string.Equals(continueStr, "true", StringComparison.OrdinalIgnoreCase))
+            {
+                isAtomic = false;
+            }
+        }
+
         var batch = container.CreateTransactionalBatch(pk);
+        if (batch is InMemoryTransactionalBatch inMemoryBatch)
+        {
+            inMemoryBatch.IsAtomic = isAtomic;
+        }
+
         foreach (var op in batchOps)
         {
             switch (op.OperationType)
@@ -286,6 +311,7 @@ internal static class HybridRowBatchCodec
         }
 
         var batchResponse = await batch.ExecuteAsync(cancellationToken);
+        var inMemoryBatchResponse = batchResponse as InMemoryBatchResponse;
 
         var batchResultLayout = BatchSchemas.ResultLayout;
         var batchLayoutResolverForResponse = BatchSchemas.Resolver;
@@ -305,24 +331,31 @@ internal static class HybridRowBatchCodec
                 }
 
                 var opResult = batchResponse[(int)index];
+                var opSubStatusCode = inMemoryBatchResponse?.GetOperationSubStatusCode((int)index) ?? 0;
                 var row = new RowBuffer(256, resizer);
                 row.InitLayout(HybridRowVersion.V1, batchResultLayout, batchLayoutResolverForResponse);
-                var r = RowWriter.WriteBuffer(ref row, opResult, (ref RowWriter writer, TypeArgument _, TransactionalBatchOperationResult result) =>
+                var r = RowWriter.WriteBuffer(ref row, (opResult, opSubStatusCode), (ref RowWriter writer, TypeArgument _, (TransactionalBatchOperationResult result, int subStatus) ctx) =>
                 {
-                    var wr = writer.WriteInt32("statusCode", (int)result.StatusCode);
+                    var wr = writer.WriteInt32("statusCode", (int)ctx.result.StatusCode);
                     if (wr != Result.Success) return wr;
 
-                    if (result.ETag is not null)
+                    if (ctx.subStatus != 0)
                     {
-                        wr = writer.WriteString("eTag", result.ETag);
+                        wr = writer.WriteInt32("subStatusCode", ctx.subStatus);
                         if (wr != Result.Success) return wr;
                     }
 
-                    if (result.ResourceStream is not null)
+                    if (ctx.result.ETag is not null)
+                    {
+                        wr = writer.WriteString("eTag", ctx.result.ETag);
+                        if (wr != Result.Success) return wr;
+                    }
+
+                    if (ctx.result.ResourceStream is not null)
                     {
                         using var ms = new MemoryStream();
-                        result.ResourceStream.CopyTo(ms);
-                        result.ResourceStream.Position = 0;
+                        ctx.result.ResourceStream.CopyTo(ms);
+                        ctx.result.ResourceStream.Position = 0;
                         wr = writer.WriteBinary("resourceBody", ms.ToArray());
                         if (wr != Result.Success) return wr;
                     }
@@ -352,6 +385,10 @@ internal static class HybridRowBatchCodec
         httpResponse.Headers.Add("x-ms-request-charge", "1");
         httpResponse.Headers.Add("x-ms-activity-id", Guid.NewGuid().ToString());
         httpResponse.Headers.Add("x-ms-session-token", container.CurrentSessionToken);
+        if (inMemoryBatchResponse is { BatchSubStatusCode: not 0 })
+        {
+            httpResponse.Headers.Add("x-ms-substatus", inMemoryBatchResponse.BatchSubStatusCode.ToString(CultureInfo.InvariantCulture));
+        }
         return httpResponse;
     }
 

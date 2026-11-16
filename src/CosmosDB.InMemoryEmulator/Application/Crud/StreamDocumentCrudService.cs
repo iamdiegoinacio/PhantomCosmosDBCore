@@ -1,5 +1,6 @@
 #nullable enable
 using System.Net;
+using CosmosDB.InMemoryEmulator.Domain.Primitives;
 using CosmosDB.InMemoryEmulator.Domain.Validation;
 using CosmosDB.InMemoryEmulator.Infrastructure.SdkInterop;
 using CosmosDB.InMemoryEmulator.Infrastructure.Storage;
@@ -16,7 +17,7 @@ namespace CosmosDB.InMemoryEmulator.Application.Crud;
 /// </summary>
 internal static class StreamDocumentCrudService
 {
-    private const int InconsistentPartitionKeySubStatus = 1001;
+    private const int InconsistentPartitionKeySubStatus = CosmosSubStatusCodes.PartitionKeyMismatch;
 
     public static async Task<ResponseMessage> CreateItemStreamAsync(
         DocumentOperationContext context,
@@ -39,7 +40,7 @@ internal static class StreamDocumentCrudService
             return Respond(context, HttpStatusCode.BadRequest);
 
         var itemId = jObj["id"]?.ToString() ?? Guid.NewGuid().ToString();
-        if (itemId.Length == 0)
+        if (!CosmosResourceNameValidator.IsDocumentIdValid(itemId))
             return Respond(context, HttpStatusCode.BadRequest);
 
         if (!PartitionKeyProcessor.IsPartitionKeyConsistent(partitionKey, jObj, context.PartitionKeyPaths))
@@ -56,7 +57,7 @@ internal static class StreamDocumentCrudService
             {
                 if (!UniqueKeyValidator.ValidateUniqueKeysStream(
                         context.ContainerProperties.UniqueKeyPolicy, store.Items, jObj, pk))
-                    return Respond(context, HttpStatusCode.Conflict);
+                    return Respond(context, HttpStatusCode.Conflict, subStatusCode: CosmosSubStatusCodes.UniqueKeyConstraintViolation);
                 if (!store.Items.TryAdd(key, json))
                     return Respond(context, HttpStatusCode.Conflict);
             }
@@ -126,9 +127,10 @@ internal static class StreamDocumentCrudService
         if (!DocumentValidator.IsPerItemTtlValid(jObj))
             return Respond(context, HttpStatusCode.BadRequest);
 
-        var itemId = jObj["id"]?.ToString();
-        if (itemId is null)
+        var rawItemId = jObj["id"]?.ToString();
+        if (!CosmosResourceNameValidator.IsDocumentIdValid(rawItemId))
             return Respond(context, HttpStatusCode.BadRequest);
+        var itemId = rawItemId!;
         if (!PartitionKeyProcessor.IsPartitionKeyConsistent(partitionKey, jObj, context.PartitionKeyPaths))
             return Respond(context, HttpStatusCode.BadRequest, subStatusCode: InconsistentPartitionKeySubStatus);
 
@@ -147,7 +149,7 @@ internal static class StreamDocumentCrudService
             {
                 if (!UniqueKeyValidator.ValidateUniqueKeysStream(
                         context.ContainerProperties.UniqueKeyPolicy, store.Items, jObj, pk, excludeItemId: itemId))
-                    return Respond(context, HttpStatusCode.Conflict);
+                    return Respond(context, HttpStatusCode.Conflict, subStatusCode: CosmosSubStatusCodes.UniqueKeyConstraintViolation);
 
                 previous = DocumentWriteCommitter.Capture(store, key);
                 committed = DocumentWriteCommitter.Write(context, key, json);
@@ -200,6 +202,9 @@ internal static class StreamDocumentCrudService
         if (!PartitionKeyProcessor.IsPartitionKeyConsistent(partitionKey, jObj, context.PartitionKeyPaths))
             return Respond(context, HttpStatusCode.BadRequest, subStatusCode: InconsistentPartitionKeySubStatus);
 
+        if (!CosmosResourceNameValidator.IsDocumentIdValid(id))
+            return Respond(context, HttpStatusCode.BadRequest);
+
         var bodyId = jObj["id"]?.ToString();
         if (bodyId is not null && bodyId != id)
             return Respond(context, HttpStatusCode.BadRequest);
@@ -229,7 +234,7 @@ internal static class StreamDocumentCrudService
             {
                 if (!UniqueKeyValidator.ValidateUniqueKeysStream(
                         context.ContainerProperties.UniqueKeyPolicy, store.Items, jObj, pk, excludeItemId: id))
-                    return Respond(context, HttpStatusCode.Conflict);
+                    return Respond(context, HttpStatusCode.Conflict, subStatusCode: CosmosSubStatusCodes.UniqueKeyConstraintViolation);
 
                 committed = DocumentWriteCommitter.Write(context, key, json);
             }
