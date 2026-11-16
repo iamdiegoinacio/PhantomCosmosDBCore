@@ -212,6 +212,12 @@ public class FakeCosmosHandler : HttpMessageHandler
                 _container.CurrentSessionToken);
         }
 
+        var scriptsResponse = await GatewayScriptsRouteHandler.TryHandleAsync(request, _container, cancellationToken);
+        if (scriptsResponse is not null)
+        {
+            return scriptsResponse;
+        }
+
         if (method == "GET" && path.Contains("/colls/") && !path.Contains("/docs"))
         {
             return CosmosHttpHeaders.CreateJsonResponse(
