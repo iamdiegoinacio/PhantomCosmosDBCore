@@ -405,6 +405,15 @@ internal sealed class GatewayQueryExecutionService
         }
         var totalChanges = allChanges.Count;
 
+        if (request.Headers.IfModifiedSince is { } modifiedSince)
+        {
+            var sinceEpoch = modifiedSince.ToUnixTimeSeconds();
+            allChanges = allChanges
+                .Where(change => change["_ts"]?.Type is not JTokenType.Integer
+                                 || change["_ts"]!.Value<long>() >= sinceEpoch)
+                .ToList();
+        }
+
         allChanges = FilterDocumentsByRange(allChanges.Cast<JToken>().ToList(), rangeId)
             .Cast<JObject>().ToList();
 

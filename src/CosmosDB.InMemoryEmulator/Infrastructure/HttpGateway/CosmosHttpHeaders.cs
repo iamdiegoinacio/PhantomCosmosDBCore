@@ -55,6 +55,10 @@ internal static class CosmosHttpHeaders
         "x-ms-cosmos-query-optimisticdirectexecute",
         "x-ms-cosmos-supported-serialization-formats",
         "x-ms-cosmos-supported-query-features",
+        "x-ms-documentdb-pre-trigger-include",
+        "x-ms-documentdb-post-trigger-include",
+        "x-ms-documentdb-script-enable-logging",
+        "x-ms-offer-throughput",
     };
 
     public static string ExtractDocumentId(HttpRequestMessage request)
@@ -88,7 +92,34 @@ internal static class CosmosHttpHeaders
         {
             options.IfNoneMatchEtag = request.Headers.IfNoneMatch.First().Tag;
         }
+
+        var preTriggers = ReadCommaSeparatedHeader(request, "x-ms-documentdb-pre-trigger-include");
+        if (preTriggers.Count > 0)
+        {
+            options.PreTriggers = preTriggers;
+        }
+
+        var postTriggers = ReadCommaSeparatedHeader(request, "x-ms-documentdb-post-trigger-include");
+        if (postTriggers.Count > 0)
+        {
+            options.PostTriggers = postTriggers;
+        }
+
         return options;
+    }
+
+    private static List<string> ReadCommaSeparatedHeader(HttpRequestMessage request, string headerName)
+    {
+        var result = new List<string>();
+        if (request.Headers.TryGetValues(headerName, out var values))
+        {
+            foreach (var value in values)
+            {
+                result.AddRange(value.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries));
+            }
+        }
+
+        return result;
     }
 
     public static bool IsQueryRequest(HttpRequestMessage request)
@@ -287,11 +318,19 @@ internal static class CosmosHttpHeaders
             }
         }
 
+        var subStatus = cosmosResponse.Headers["x-ms-substatus"];
+
+        if (httpResponse.Content is null && (int)cosmosResponse.StatusCode >= 400)
+        {
+            var message = cosmosResponse.ErrorMessage ?? cosmosResponse.StatusCode.ToString();
+            httpResponse.Content = new StringContent(
+                BuildErrorBody(cosmosResponse.StatusCode, message), Encoding.UTF8, "application/json");
+        }
+
         httpResponse.Headers.Add("x-ms-request-charge", "1");
         httpResponse.Headers.Add("x-ms-activity-id", cosmosResponse.Headers["x-ms-activity-id"] ?? Guid.NewGuid().ToString());
         httpResponse.Headers.Add("x-ms-session-token", sessionToken);
 
-        var subStatus = cosmosResponse.Headers["x-ms-substatus"];
         if (subStatus is not null)
         {
             httpResponse.Headers.Add("x-ms-substatus", subStatus);
@@ -304,6 +343,40 @@ internal static class CosmosHttpHeaders
         }
 
         return httpResponse;
+    }
+
+    /// <summary>
+    /// Builds the standard Cosmos DB error envelope: <c>{"code":"NotFound","message":"..."}</c>.
+    /// </summary>
+    public static string BuildErrorBody(HttpStatusCode statusCode, string message)
+    {
+        var body = new JObject
+        {
+            ["code"] = statusCode.ToString(),
+            ["message"] = message
+        };
+        return body.ToString(Newtonsoft.Json.Formatting.None);
+    }
+
+    public static HttpResponseMessage CreateErrorResponse(
+        HttpStatusCode statusCode,
+        string message,
+        int subStatusCode,
+        string sessionToken)
+    {
+        var response = new HttpResponseMessage(statusCode)
+        {
+            Content = new StringContent(BuildErrorBody(statusCode, message), Encoding.UTF8, "application/json")
+        };
+        response.Headers.Add("x-ms-request-charge", "1");
+        response.Headers.Add("x-ms-activity-id", Guid.NewGuid().ToString());
+        response.Headers.Add("x-ms-session-token", sessionToken);
+        if (subStatusCode != 0)
+        {
+            response.Headers.Add("x-ms-substatus", subStatusCode.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+
+        return response;
     }
 
     public static HttpResponseMessage CreateJsonResponse(string json, string sessionToken, HttpStatusCode statusCode = HttpStatusCode.OK)
